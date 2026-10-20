@@ -1,0 +1,14 @@
+# Third-party packages for ~/LITEX-68K/litex-venv: those of ~/LITEX/litex-venv that
+# LiteX's build and tools use, at the same versions, plus meson and ninja, which
+# LiteX needs to build picolibc and which neither the host nor that venv has.
+# (amaranth and the luna-usb stack are left out; nothing here uses them.)
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+packaging==26.3
+pyserial==3.5
+pyvcd==0.4.2
+PyYAML==6.0.3
+requests==2.34.2
+setuptools==84.2.0
+meson
+ninja
