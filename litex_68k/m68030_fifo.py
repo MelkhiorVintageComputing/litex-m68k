@@ -37,7 +37,7 @@ from litex.gen import *
 
 from litex.soc.interconnect import stream, wishbone
 
-from litex_68k.m68030_bus import m68030_byte_enables
+from litex_68k.m68030_bus import m68030_byte_enables, m68030_coprocessor_cycle
 
 TAG_BITS = 3
 
@@ -83,9 +83,10 @@ class M68030ToFIFO(LiteXModule):
     CBACK sampled with the fourth STERM says nothing more is coming.
 
     CPU space (FC = 7) is never forwarded: AVEC for an interrupt acknowledge,
-    BERR for the rest (as M68030ToWishbone, see there).
+    nothing for a coprocessor in `coprocessors` (CpIDs: it is on the bus and
+    answers), BERR for the rest (as M68030ToWishbone, see there).
     """
-    def __init__(self, bus, io_regions={}):
+    def __init__(self, bus, io_regions={}, coprocessors=()):
         self.bus      = bus
         self.request  = request  = stream.Endpoint(request_layout())
         self.response = response = stream.Endpoint(response_layout())
@@ -113,10 +114,12 @@ class M68030ToFIFO(LiteXModule):
         # Decoding, from the address phase (valid from S0, UM 7.3.1).
         cpu_space = Signal()
         iack      = Signal()
+        coprocessor = Signal()
         in_io     = Signal()
         self.comb += [
             cpu_space.eq(bus.fc == 0b111),
             iack.eq(bus.a[16:20] == 0xf),
+            coprocessor.eq(m68030_coprocessor_cycle(bus, coprocessors)),
             in_io.eq(reduce(or_, [(bus.a >= origin) & (bus.a <= origin + length - 1)
                                   for origin, length in io_regions.items()], 0)),
         ]
@@ -152,10 +155,13 @@ class M68030ToFIFO(LiteXModule):
                 If(cpu_space,
                     If(iack,
                         NextValue(avec_n, 0),
+                        NextState("END"),
+                    ).Elif(coprocessor,
+                        NextState("ELSEWHERE"),
                     ).Else(
                         NextValue(berr_n, 0),
+                        NextState("END"),
                     ),
-                    NextState("END"),
                 ).Else(
                     NextValue(adr, bus.a[2:]),
                     NextValue(sel, write_sel),
@@ -249,6 +255,12 @@ class M68030ToFIFO(LiteXModule):
                     NextValue(sterm_n, 1),
                     NextState("END"),
                 ),
+            ),
+        )
+        # A cycle another slave on the bus answers (a coprocessor's, UM 10.1).
+        fsm.act("ELSEWHERE",
+            If(bus.as_n,
+                NextState("IDLE"),
             ),
         )
         # STERM is one clock (UM 7.3.4: negated within two). AVEC and BERR are held
@@ -397,19 +409,42 @@ class M68030ToFIFOToSoC(LiteXModule):
     them (none when cd is sys). `bus` is the MC68030 bus, `wishbone_bus` the
     SoC's side Wishbone master (in sys).
 
-    The FIFOs' two sides are reset by their own clock domain's reset: the two
-    domains must be reset together (as a CRG does, from one MMCM's lock). Not
+    Reset: all of it, on both sides, while either clock domain is in reset.
+    LiteX's FIFOs reset their pointers synchronously, so one side resets only
+    once its clock runs. Two clocks from two MMCMs come out of reset at
+    different times, and a side out of reset first would read the other
+    side's pointer as it was before the reset: a FIFO with stale entries in
+    it, then pointers that disagree for good. (Seen on the Wukong: `reboot`,
+    junk on the UART, then nothing.) Each side's reset is its own domain's or
+    the other's. The other's goes away asynchronously to this side's clock,
+    with everything idle (pointers at 0, the processor in reset), so on
+    whichever edge it lands, nothing moves. Not stream.ClockDomainCrossing's
     with_common_rst: its AsyncResetSynchronizers, lowered for simulation
     (litex/build/sim/common.py), all share one clock domain name, "resync", so
-    with more than one of them in a design, all but one are clocked by the wrong
+    with more than one in a design, all but one are clocked by the wrong
     clock."""
-    def __init__(self, bus, wishbone_bus, cd="sys", io_regions={}, depth=8):
-        self.cpu_side = ClockDomainsRenamer(cd)(M68030ToFIFO(bus, io_regions=io_regions))
-        self.soc_side = FIFOToSoC(wishbone_bus)
+    def __init__(self, bus, wishbone_bus, cd="sys", io_regions={}, coprocessors=(), depth=8):
+        cpu_side = M68030ToFIFO(bus, io_regions=io_regions, coprocessors=coprocessors)
+        soc_side = FIFOToSoC(wishbone_bus)
+        if cd == "sys":
+            cd_cpu = cd_sys = "sys"
+        else:
+            cd_cpu, cd_sys = "m68k_bridge_cpu", "m68k_bridge_sys"
+            self.cd_m68k_bridge_cpu = ClockDomain(cd_cpu)
+            self.cd_m68k_bridge_sys = ClockDomain(cd_sys)
+            either = ResetSignal(cd) | ResetSignal("sys")
+            self.comb += [
+                self.cd_m68k_bridge_cpu.clk.eq(ClockSignal(cd)),
+                self.cd_m68k_bridge_cpu.rst.eq(either),
+                self.cd_m68k_bridge_sys.clk.eq(ClockSignal("sys")),
+                self.cd_m68k_bridge_sys.rst.eq(either),
+            ]
+        self.cpu_side = ClockDomainsRenamer(cd_cpu)(cpu_side)
+        self.soc_side = ClockDomainsRenamer(cd_sys)(soc_side)
         self.request_cdc = stream.ClockDomainCrossing(request_layout(),
-            cd_from=cd, cd_to="sys", depth=depth)
+            cd_from=cd_cpu, cd_to=cd_sys, depth=depth)
         self.response_cdc = stream.ClockDomainCrossing(response_layout(),
-            cd_from="sys", cd_to=cd, depth=4)
+            cd_from=cd_sys, cd_to=cd_cpu, depth=4)
         self.comb += [
             self.cpu_side.request.connect(self.request_cdc.sink),
             self.request_cdc.source.connect(self.soc_side.request),

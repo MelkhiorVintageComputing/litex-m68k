@@ -132,11 +132,15 @@ def main():
         icache = re.search(r"icache: (stale until CI|coherent)", out)
         dcache = re.search(r"dcache: write allocation coherent, without it (stale until CD|coherent)", out)
         check(icache and dcache, "cputest: no cache report")
-        cached = args.variant != "minimal"
+        cached = args.variant.split("+")[0] != "minimal"
         check((icache.group(1) == "stale until CI") == cached,
             "icache: {} on the {} variant".format(icache.group(1), args.variant))
         check((dcache.group(1) == "stale until CD") == cached,
             "dcache without write allocation: {} on the {} variant".format(dcache.group(1), args.variant))
+        fpu = re.search(r"fpu: (present|absent)", out)
+        check(fpu, "cputest: no FPU report")
+        check((fpu.group(1) == "present") == ("+fpu" in args.variant),
+            "fpu: {} on the {} variant".format(fpu.group(1), args.variant))
         out = con.expect(r"SR [0-9a-f]{4}\n", 60)
         m = re.search(r"illegal instruction at ([0-9a-f]{8})", out)
         check(m, "cputest: no address for the last exception")

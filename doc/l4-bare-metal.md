@@ -82,6 +82,13 @@ simulation: 0.9 KiB/s.
     line alone: the other alias reads stale data until CD with the data cache,
     and fresh data without it. (The first version of this test expected stale
     data with WA set; RD68031 was right, the test was not.)
+  - **FPU** (added in L6, `doc/l6-fpu.md`): FNOP takes the line F exception
+    with no FPU ("fpu: absent"); with RD68884 ("fpu: present"), bit-exact
+    FMUL, FDIV, FSQRT, FINTRZ and FMOVE.L against values computed on the host,
+    FMOVECR's pi, FSIN of pi/6, an infinity and FPSR's accrued DZ from a divide
+    by zero, the MC68881's idle FSAVE frame ($1F18), and the divide by zero
+    again with its exception enabled: taken on the next FPU instruction, a
+    format $0 frame with vector 50 and that instruction's PC (UM 10.4.18).
   - Last, an illegal instruction with VBR back on crt0's table: crt0 reports it
     with its PC, and stops.
 
@@ -97,7 +104,8 @@ simulation: 0.9 KiB/s.
    changes what the next boot loads by copying another image there.
 3. The demo: banner, `help`, `helloc`. Then `boot.bin` becomes cputest, and
    the demo's `reboot` resets the SoC: the BIOS starts again and loads it.
-4. cputest's result, its cache lines against the variant, and crt0's report
+4. cputest's result, its cache lines and its FPU line ("fpu: present" on the
+   `+fpu` variants only) against the variant, and crt0's report
    of the last illegal instruction at the address cputest printed.
 
 `bios_test.py` (L3) and `l4_test.py` share `simtest.py`: the simulation's

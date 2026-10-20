@@ -11,15 +11,19 @@
 Two configurations (doc/l5-wukong.md):
 
 - DDR3 main RAM (the default): the SoC at --sys-clk-freq (100 MHz), which
-  LiteDRAM's Artix-7 PHY needs, and the CPU at --cpu-clk-freq (25 MHz; RD68031
-  makes about 29.6 MHz on an Artix-7) in a clock domain of its own, from the
-  same MMCM. The bus crosses to sys through FIFOs (litex_68k/m68030_fifo.py),
-  so any frequency the MMCM makes will do; with --bus-bridge sync (core.py),
-  the CPU's clock must be a whole fraction of sys. Main RAM is on a LiteDRAM
+  LiteDRAM's Artix-7 PHY needs, and the CPU at --cpu-clk-freq (30 MHz, 25
+  with --bus-bridge sync; RD68031 makes about 29.6 MHz on an Artix-7) in a
+  clock domain of its own, from the
+  50 MHz input through an MMCM of its own. The bus crosses to sys through
+  FIFOs (litex_68k/m68030_fifo.py), so any frequency that MMCM makes will do;
+  with --bus-bridge sync (core.py), the CPU's clock comes from the main MMCM
+  and must be a whole fraction of sys. Main RAM is on a LiteDRAM
   native port of the CPU's own (128 bits: the DDR3 is 16 bits, 1:4). Output:
   build/qmtech_wukong (build/qmtech_wukong_sync with --bus-bridge sync).
 - --integrated-main-ram-size N: block RAM instead, and one clock for all, the
   CPU's. Output: build/qmtech_wukong_bram.
+
+--cpu-variant standard+fpu adds the RD68884 FPU (core.py).
 
 Defaults that differ from litex-boards': --cpu-type rd68031, --revision 3,
 --timer-uptime, the clocks above, and the output directory, in this repository.
@@ -34,6 +38,8 @@ import sys
 
 from migen import ClockDomain, If, Signal
 from migen.genlib.cdc import MultiReg
+
+from litex.soc.cores.clock import S7MMCM
 
 from litex_68k.cpu import register
 from litex_68k.cpu.rd68031.core import RD68031
@@ -112,7 +118,24 @@ def crg(qmtech_wukong, cpu_clk_freq=None):
 
             if cpu_clk_freq is not None:
                 self.cd_cpu = ClockDomain()
-                self.pll.create_clkout(self.cd_cpu, cpu_clk_freq)
+                if RD68031.bus_bridge == "fifo":
+                    # An MMCM of its own, from the same 50 MHz and the same
+                    # reset: the main MMCM's outputs stay litex-boards' (sys
+                    # and the DDR3's 4x), and the CPU's clock is any its VCO
+                    # makes. Every path between the CPU's clock and sys is a
+                    # clock domain crossing designed as one (asynchronous
+                    # FIFOs, MultiRegs; IPL the core synchronises itself), so
+                    # the two clocks are asynchronous to Vivado too.
+                    self.cpu_pll = cpu_pll = S7MMCM(speedgrade=speed_grade)
+                    self.comb += cpu_pll.reset.eq(self.pll.reset)
+                    cpu_pll.register_clkin(self.pll.clkin, 50e6)
+                    cpu_pll.create_clkout(self.cd_cpu, cpu_clk_freq)
+                    platform.add_false_path_constraints(self.cd_sys.clk, self.cd_cpu.clk)
+                else:
+                    # WishboneSyncCrossing (core.py) needs the CPU's clock and
+                    # sys from one MMCM, aligned, and Vivado timing the paths
+                    # between them.
+                    self.pll.create_clkout(self.cd_cpu, cpu_clk_freq)
     qmtech_wukong._CRG = _CRG
 
 def cpu_clock_domain(qmtech_wukong, cpu_clk_freq):
@@ -130,8 +153,11 @@ def main():
     # --load is ours: litex-boards' would run OpenOCD.
     load = "--load" in argv
     argv = [a for a in argv if a != "--load"]
-    cpu_clk_freq = float(get_option(argv, "--cpu-clk-freq", "25e6", remove=True))
     RD68031.bus_bridge = get_option(argv, "--bus-bridge", RD68031.bus_bridge, remove=True)
+    # 30 MHz on a clock of its own with the FIFO bridge (doc/l6-fpu.md); 25 MHz,
+    # a quarter of sys, with "sync".
+    cpu_clk_freq = float(get_option(argv, "--cpu-clk-freq",
+        "30e6" if RD68031.bus_bridge == "fifo" else "25e6", remove=True))
     ddr3 = get_option(argv, "--integrated-main-ram-size") is None
     name = "qmtech_wukong" if ddr3 else "qmtech_wukong_bram"
     if RD68031.bus_bridge != "fifo":

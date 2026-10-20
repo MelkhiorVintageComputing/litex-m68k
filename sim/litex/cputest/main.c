@@ -12,9 +12,14 @@
  *               alias and an invalid page above them; U and M updates, PTEST,
  *               and the data cache's logical tags seen through the aliases,
  *               with and without write allocation (UM 9, 6.1.2.1)
+ *   fpu         whether there is one (FNOP, a line F exception without);
+ *               with RD68884: arithmetic, a constant ROM value, a
+ *               transcendental, FPSR, an FPU exception and the MC68881's idle
+ *               FSAVE frame (FPU 2, 4, 6)
  *
  * The cache checks print what they see ("stale", or "coherent" when a cache
- * is not built in); sim/litex/l4_test.py knows which variant should say what.
+ * is not built in), and the FPU check whether there is one ("fpu: present" or
+ * "fpu: absent"); sim/litex/l4_test.py knows which variant should say what.
  * Then "cputest: PASS" or "cputest: FAIL", and a last illegal instruction left
  * to crt0's handler, which reports it and stops. */
 
@@ -34,6 +39,7 @@ DECLARE(t_illegal); DECLARE(t_zerodiv); DECLARE(t_chk); DECLARE(t_trapv);
 DECLARE(t_trap5); DECLARE(t_linea); DECLARE(t_linef); DECLARE(t_priv);
 DECLARE(t_trace); DECLARE(t_addrerr); DECLARE(t_berr_read); DECLARE(t_berr_write);
 DECLARE(t_mmu_read); DECLARE(t_mmu_write); DECLARE(t_unhandled);
+DECLARE(t_fnop); DECLARE(t_fpdz);
 
 volatile uint32_t mmu_probe;            /* the address t_mmu_read/write use */
 
@@ -339,6 +345,92 @@ static void test_mmu(void)
 	printf("mmu: %s\n", failures == f0 ? "ok" : "FAIL");
 }
 
+/* --- FPU ------------------------------------------------------------------- */
+
+/* Built with the cross-compiler's default, -m68881: the doubles below are FPU
+ * instructions, run only once FNOP has shown there is an FPU. Results are
+ * compared bit for bit, as doubles. */
+
+static uint64_t bits(double d)
+{
+	uint64_t b;
+	memcpy(&b, &d, sizeof b);
+	return b;
+}
+
+#define CHECK_BITS(d, want, what) do {                                  \
+		uint64_t _b = bits(d);                                  \
+		CHECK(_b == (want), what, "%08x%08x, expected %08x%08x",\
+			(unsigned)(_b >> 32), (unsigned)_b,             \
+			(unsigned)((want) >> 32), (unsigned)(want));    \
+	} while (0)
+
+/* volatile: computed at run time, by the FPU, not by the compiler. */
+static volatile double one = 1.0, two = 2.0, three = 3.0, x15 = 1.5, x225 = 2.25;
+static volatile double m75 = -7.5;
+static volatile int i123 = 123456789;
+
+static void frestore_null(void)
+{
+	/* A null frame resets the FPU (FPU 6.4.2): FPCR, FPSR, any exception. */
+	static const uint32_t null_frame = 0;
+	__asm__ __volatile__ ("frestore %0" : : "m" (null_frame));
+}
+
+/* Not inlined: its prologue may save FPU registers, which only an FPU can. */
+static void __attribute__((noinline)) fpu_checks(void)
+{
+	double d;
+	uint32_t fpsr, frame[64];
+
+	CHECK_BITS(x15 * x225, 0x400b000000000000ULL, "fmul");          /* 3.375 */
+	CHECK_BITS(one / three, 0x3fd5555555555555ULL, "fdiv");         /* 1/3 */
+	__asm__ __volatile__ ("fsqrt.x %1, %0" : "=f" (d) : "f" (two));
+	CHECK_BITS(d, 0x3ff6a09e667f3bcdULL, "fsqrt");
+	CHECK((int)m75 == -7, "fintrz", "%d", (int)m75);
+	CHECK_BITS((double)i123, 0x419d6f3454000000ULL, "fmove.l");
+	__asm__ __volatile__ ("fmovecr #0, %0" : "=f" (d));            /* pi */
+	CHECK_BITS(d, 0x400921fb54442d18ULL, "fmovecr pi");
+	__asm__ __volatile__ ("fsin.x %1, %0" : "=f" (d) : "f" (d / 6.0));
+	CHECK(bits(d) == 0x3fe0000000000000ULL || bits(d) == 0x3fdfffffffffffffULL,
+		"fsin", "sin(pi/6) %08x%08x", (unsigned)(bits(d) >> 32), (unsigned)bits(d));
+
+	/* Divide by zero, not enabled: an infinity, and DZ in FPSR's accrued
+	 * exception byte (FPU 2.2.3; its exception byte is the last
+	 * instruction's, which may be a move of the result). d is an input of the
+	 * FPSR read so that the read comes after the division. */
+	d = one / (one - one);
+	__asm__ __volatile__ ("fmove.l %%fpsr, %0" : "=d" (fpsr) : "f" (d));
+	CHECK_BITS(d, 0x7ff0000000000000ULL, "fdiv by 0");
+	CHECK(fpsr & 0x0010, "fpsr dz", "FPSR %08x", (unsigned)fpsr);
+
+	/* An idle frame, after an instruction: the MC68881's, version $1F, $18
+	 * bytes after its format word (FPU 6.4.2). */
+	__asm__ __volatile__ ("fsave %0" : "=m" (frame));
+	CHECK((frame[0] >> 16) == 0x1f18, "fsave", "frame word %08x", (unsigned)frame[0]);
+	frestore_null();
+
+	/* Enabled: an exception, on the next FPU instruction. */
+	expect("fpu divide by zero", t_fpdz, 0x00c8, t_fpdz_insn, 0);
+	frestore_null();
+}
+
+static void test_fpu(void)
+{
+	unsigned got = trap_run(t_fnop);
+
+	if (got == 0x002c) {
+		printf("fpu: absent\n");
+		return;
+	}
+	CHECK(got == 0, "fnop", "format/vector %04x", got);
+	if (got)
+		return;
+	printf("fpu: present\n");
+	frestore_null();
+	fpu_checks();
+}
+
 /* --- Main ------------------------------------------------------------------ */
 
 int main(void)
@@ -358,6 +450,7 @@ int main(void)
 	test_exceptions();
 	test_icache();
 	test_mmu();
+	test_fpu();
 
 	set_vbr(vbr);
 	printf("cputest: %s (%d checks, %d failed)\n", failures ? "FAIL" : "PASS", checks, failures);

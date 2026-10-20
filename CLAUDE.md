@@ -48,12 +48,12 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | `litex_68k/cpu/rd68031/` | the LiteX CPU class and its software files (`litex_68k.cpu.register()`; `doc/l2-litex.md`) |
 | `targets/sim.py` | `litex_sim` with RD68031 (`--uart-tx-clocks` paces its UART like a baud rate; `--cpu-clk-freq` puts the CPU on a clock of its own) |
 | `sim/unit/` | migen unit tests of `core.py`'s bus crossing and time-out, two clocks, in migen's simulator: no Verilator build (`make -C sim/unit check`) |
-| `targets/qmtech_wukong.py` | L5: the Wukong V3 board, DDR3 (CPU 25 MHz, SoC 100 MHz) or block RAM, `--bus-bridge fifo` (default) or `sync`, `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
+| `targets/qmtech_wukong.py` | L5/L6: the Wukong V3 board, DDR3 (CPU 30 MHz on its own MMCM, SoC 100 MHz) or block RAM, `--bus-bridge fifo` (default) or `sync` (CPU 25 MHz), `--cpu-variant standard+fpu` for RD68884 (`doc/l6-fpu.md`), `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
 | `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`); the tests take `--cpu-clk-freq` and `--sdram` (DDR3, 128-bit native port) |
 | `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
-| `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031` |
-| `../pythondata-cpu-rd68031` | the RD68031 RTL snapshot LiteX builds from (`get_data_mod("cpu", "rd68031")`) |
+| `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031`, and from `Inputs/RD68884` (the FPU) |
+| `../pythondata-cpu-rd68031` | the RD68031 and RD68884 RTL snapshot LiteX builds from (`get_data_mod("cpu", "rd68031")`) |
 
 ## Environment
 

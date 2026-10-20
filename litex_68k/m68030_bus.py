@@ -68,6 +68,13 @@ def m68030_byte_enables(siz, a):
         sel.eq(Cat(*[(a[0:2] <= k) & (a[0:2] + n > k) for k in reversed(range(4))])),
     ]
 
+def m68030_coprocessor_cycle(bus, cpids):
+    """True when the cycle on `bus` is to a coprocessor whose CpID is in `cpids`:
+    CPU space, A19-A16 = 2 (coprocessor communication), A15-A13 = CpID (UM 10.1,
+    Figure 10-2)."""
+    return reduce(or_, [(bus.fc == 0b111) & (bus.a[16:20] == 0x2) & (bus.a[13:16] == cpid)
+                        for cpid in cpids], 0)
+
 # The bridge ---------------------------------------------------------------------------------------
 
 class M68030ToWishbone(LiteXModule):
@@ -90,7 +97,9 @@ class M68030ToWishbone(LiteXModule):
       autovectored, AVEC held until AS is negated (UM 7.4.1.2). Every other CPU
       space cycle gets BERR: a breakpoint acknowledge then takes the illegal
       instruction exception (UM 7.4.2), and a coprocessor access with no
-      coprocessor to answer it the F-line exception (UM 10.1.1).
+      coprocessor to answer it the F-line exception (UM 10.1.1). A cycle to a
+      coprocessor in `coprocessors` (CpIDs) is left alone: that coprocessor is
+      on the bus too, and answers it with DSACK.
 
     Timing, rising edges only (the processor's own rising edges, in its clock
     domain): AS is asserted in S1, on a falling edge, and is seen on the rising
@@ -100,7 +109,7 @@ class M68030ToWishbone(LiteXModule):
     from registers, so it has a full clock to meet STERM and CIIN and half a
     clock for the data, AVEC and BERR, which are sampled on falling edges.
     """
-    def __init__(self, bus=None, wishbone_bus=None, io_regions={}, timeout=1024):
+    def __init__(self, bus=None, wishbone_bus=None, io_regions={}, timeout=1024, coprocessors=()):
         self.bus      = bus = Record(m68030_bus_layout) if bus is None else bus
         self.wishbone = wb  = wishbone.Interface(data_width=32, address_width=32, addressing="word") \
                               if wishbone_bus is None else wishbone_bus
@@ -128,10 +137,12 @@ class M68030ToWishbone(LiteXModule):
         # Decoding, from the address phase (valid from S0, UM 7.3.1).
         cpu_space = Signal()
         iack      = Signal()
+        coprocessor = Signal()
         in_io     = Signal()
         self.comb += [
             cpu_space.eq(bus.fc == 0b111),
             iack.eq(bus.a[16:20] == 0xf),
+            coprocessor.eq(m68030_coprocessor_cycle(bus, coprocessors)),
             in_io.eq(reduce(or_, [(bus.a >= origin) & (bus.a <= origin + length - 1)
                                   for origin, length in io_regions.items()], 0)),
         ]
@@ -158,10 +169,13 @@ class M68030ToWishbone(LiteXModule):
                 If(cpu_space,
                     If(iack,
                         NextValue(avec_n, 0),
+                        NextState("END"),
+                    ).Elif(coprocessor,
+                        NextState("ELSEWHERE"),
                     ).Else(
                         NextValue(berr_n, 0),
+                        NextState("END"),
                     ),
-                    NextState("END"),
                 ).Else(
                     NextValue(adr, bus.a[2:]),
                     NextValue(sel, Mux(bus.rw, 0b1111, write_sel)),
@@ -194,6 +208,12 @@ class M68030ToWishbone(LiteXModule):
             ).Elif(wb.err | ((count == timeout - 1) if timeout else 0),
                 NextValue(berr_n, 0),
                 NextState("END"),
+            ),
+        )
+        # A cycle another slave on the bus answers (a coprocessor's, UM 10.1).
+        fsm.act("ELSEWHERE",
+            If(bus.as_n,
+                NextState("IDLE"),
             ),
         )
         # STERM is one clock (UM 7.3.4: negated within two). AVEC and BERR are held

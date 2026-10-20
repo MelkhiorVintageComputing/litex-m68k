@@ -168,6 +168,28 @@ t_mmu_write_insn:
 t_mmu_write_next:
         rts
 
+| The FPU (CpID 1, UM 10.1). FNOP: with no FPU, nothing answers its CPU space
+| cycle, the bus error makes it a line F exception (UM 10.1.1); with one, it
+| does nothing.
+        test    t_fnop
+t_fnop_insn:
+        .word   0xf280, 0x0000          | fnop
+t_fnop_next:
+        rts
+
+| A divide by zero with its exception enabled (FPCR DZ, FPU 2.2.2): the FPU
+| reports it on the next FPU instruction, with the take pre-instruction
+| exception primitive: a format $0 frame, vector 50, the PC of that instruction
+| (UM 10.4.18, Figure 10-41).
+        test    t_fpdz
+        fmove.l #0x00000400, %fpcr
+        fmove.l #1, %fp0
+        fdiv.l  #0, %fp0
+t_fpdz_insn:
+        fnop
+t_fpdz_next:
+        rts
+
 | Last of all, one exception left to crt0's handler, the program's own (VBR is
 | back to crt0's table by then). It reports it and stops.
         test    t_unhandled

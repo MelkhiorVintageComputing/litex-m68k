@@ -51,16 +51,20 @@ from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.csr import CSRStatus, CSRStorage
 from litex.soc.cores.cpu import CPU
 
-from litex_68k.m68030_bus import m68030_bus_layout, M68030ToWishbone
+from litex_68k.m68030_bus import m68030_bus_layout, m68030_coprocessor_cycle, M68030ToWishbone
 from litex_68k.m68030_fifo import M68030ToFIFOToSoC
 
 # Variants -----------------------------------------------------------------------------------------
 
 # standard: both caches, 64 entries each (RD68031's default); minimal: no caches.
-CPU_VARIANTS = {
-    "standard" : dict(icache=64, dcache=64),
-    "minimal"  : dict(icache=0,  dcache=0),
-}
+# +fpu: and RD68884, an MC68881, as coprocessor FPU_CPID.
+CPU_VARIANTS = {}
+for _name, _caches in [("standard", 64), ("minimal", 0)]:
+    for _fpu in (False, True):
+        CPU_VARIANTS[_name + ("+fpu" if _fpu else "")] = dict(icache=_caches, dcache=_caches, fpu=_fpu)
+
+# The FPU's coprocessor ID: 1, as Motorola's software expects it (UM 10.1).
+FPU_CPID = 1
 
 # The one interrupt level every LiteX interrupt line raises (irq.h knows it too).
 IRQ_LEVEL = 2
@@ -195,17 +199,21 @@ class RD68031(CPU):
 
         # The MC68030 bus, and the bridge to Wishbone, in the CPU's clock domain.
         cd   = self.clock_domain
+        fpu  = CPU_VARIANTS[variant]["fpu"]
+        copr = (FPU_CPID,) if fpu else ()
         m68k = Record(m68030_bus_layout)
         if self.bus_bridge == "fifo":
             sys_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
-            self.bridge  = M68030ToFIFOToSoC(m68k, sys_bus, cd=cd, io_regions=self.io_regions)
+            self.bridge  = M68030ToFIFOToSoC(m68k, sys_bus, cd=cd, io_regions=self.io_regions,
+                coprocessors=copr)
             self.timeout = WishboneErrorTimeout(sys_bus, self.bus, BUS_TIMEOUT)
         elif cd == "sys":
-            self.bridge = M68030ToWishbone(m68k, self.bus, io_regions=self.io_regions)
+            self.bridge = M68030ToWishbone(m68k, self.bus, io_regions=self.io_regions,
+                coprocessors=copr)
         else:
             cpu_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
             self.bridge = ClockDomainsRenamer(cd)(
-                M68030ToWishbone(m68k, cpu_bus, io_regions=self.io_regions))
+                M68030ToWishbone(m68k, cpu_bus, io_regions=self.io_regions, coprocessors=copr))
             self.cdc = WishboneSyncCrossing(cpu_bus, self.bus, cd)
 
         # Interrupts: every unmasked line raises IRQ_LEVEL.
@@ -252,11 +260,54 @@ class RD68031(CPU):
             ])
             self.comb += reset.eq(level | (count != 0))
 
+        # The bus as the core sees it: the bridge's, and with the FPU, the FPU's
+        # data lanes when it drives them and its DSACK, wired-OR (active low).
+        core_d     = Signal(32)
+        core_dsack = Signal(2)
+        reset_n_o  = Signal()
         reset_n_oe = Signal()
+        if fpu:
+            self.fpu_d     = fpu_d     = Signal(32)
+            self.fpu_d_oe  = fpu_d_oe  = Signal(4)
+            fpu_dsack_n    = Signal(2)
+            fpu_dsack_oe   = Signal()
+            self.comb += [
+                core_d.eq(Cat(*[Mux(fpu_d_oe[l], fpu_d[8*l:8*(l + 1)], m68k.d_r[8*l:8*(l + 1)])
+                                for l in range(4)])),
+                core_dsack.eq(m68k.dsack_n & Mux(fpu_dsack_oe, fpu_dsack_n, 0b11)),
+            ]
+            # RD68884 on the CPU's own bus and clock (BUS_SYNC: its same-clock
+            # bus unit), a 32-bit port (SIZE and A0 strapped, FPU table 9-2),
+            # selected by CpID FPU_CPID's CPU space cycles (UM 10.1). RESET
+            # reaches it from the RESET instruction too, as on a board.
+            self.fpu_params = dict(
+                p_BUS_SYNC      = 1,
+                p_BUS_SYNC_WAIT = 0,
+                p_MODEL         = 68881,
+                i_clk           = ClockSignal(cd),
+                i_rst_n         = ~(ResetSignal(cd) | reset),
+                i_reset_n_i     = ~(reset_n_oe & ~reset_n_o),
+                i_cs_n_i        = ~m68030_coprocessor_cycle(m68k, copr),
+                i_as_n_i        = m68k.as_n,
+                i_ds_n_i        = m68k.ds_n,
+                i_rw_i          = m68k.rw,
+                i_size_n_i      = 1,
+                i_a_i           = Cat(Constant(1, 1), m68k.a[1:5]),
+                i_d_i           = m68k.d_w,
+                o_d_o           = fpu_d,
+                o_d_oe          = fpu_d_oe,
+                o_dsack_n_o     = fpu_dsack_n,
+                o_dsack_oe      = fpu_dsack_oe,
+            )
+        else:
+            self.comb += [
+                core_d.eq(m68k.d_r),
+                core_dsack.eq(m68k.dsack_n),
+            ]
         self.cpu_params = dict(
             p_ICACHE_ENTRIES          = CPU_VARIANTS[variant]["icache"],
             p_DCACHE_ENTRIES          = CPU_VARIANTS[variant]["dcache"],
-            p_COPROCESSOR             = 0,
+            p_COPROCESSOR             = int(fpu),
             # Inside the FPGA nothing else drives the address bus.
             p_ADDR_HIZ_BETWEEN_CYCLES = 0,
 
@@ -269,7 +320,7 @@ class RD68031(CPU):
             # Bus. The output enables are of no use inside the FPGA.
             o_fc_o       = m68k.fc,       o_fc_oe    = Open(),
             o_a_o        = m68k.a,        o_a_oe     = Open(),
-            i_d_i        = m68k.d_r,
+            i_d_i        = core_d,
             o_d_o        = m68k.d_w,      o_d_oe     = Open(),
             o_siz_o      = m68k.siz,      o_siz_oe   = Open(),
             o_ecs_n_o    = Open(),
@@ -279,7 +330,7 @@ class RD68031(CPU):
             o_as_n_o     = m68k.as_n,     o_as_oe    = Open(),
             o_ds_n_o     = m68k.ds_n,     o_ds_oe    = Open(),
             o_dben_n_o   = Open(),        o_dben_oe  = Open(),
-            i_dsack_n_i  = m68k.dsack_n,
+            i_dsack_n_i  = core_dsack,
             i_sterm_n_i  = m68k.sterm_n,
             i_ciin_n_i   = m68k.ciin_n,
             o_ciout_n_o  = m68k.ciout_n,  o_ciout_oe = Open(),
@@ -300,8 +351,8 @@ class RD68031(CPU):
 
             # The RESET instruction's pulse comes back on the wired pin, which the
             # core ignores (RD68031 doc/pinout.md).
-            i_reset_n_i  = ~reset_n_oe,
-            o_reset_n_o  = Open(),
+            i_reset_n_i  = ~(reset_n_oe & ~reset_n_o),
+            o_reset_n_o  = reset_n_o,
             o_reset_n_oe = reset_n_oe,
 
             # Emulator support: caches and MMU enabled.
@@ -312,7 +363,7 @@ class RD68031(CPU):
         )
 
         # Add Verilog sources.
-        self.add_sources(platform)
+        self.add_sources(platform, fpu=fpu)
 
     def add_soc_components(self, soc):
         # Main RAM's region, once add_sdram has made it (add_memory_buses).
@@ -336,15 +387,20 @@ class RD68031(CPU):
         self.reset_address = reset_address
 
     @staticmethod
-    def add_sources(platform):
+    def add_sources(platform, fpu=False):
         from litex.build.sim import SimPlatform
         rd68031 = get_data_mod("cpu", "rd68031")
         # The Verilator waivers first (for Verilator only), then the RTL in
         # compile order (packages first).
+        configs = [rd68031.verilator_config] + ([rd68031.fpu_verilator_config] if fpu else [])
+        sources = rd68031.sources + (rd68031.fpu_sources if fpu else [])
         if isinstance(platform, SimPlatform):
-            platform.add_source(os.path.join(rd68031.data_location, rd68031.verilator_config))
-        for f in rd68031.sources:
+            for f in configs:
+                platform.add_source(os.path.join(rd68031.data_location, f))
+        for f in sources:
             platform.add_source(os.path.join(rd68031.data_location, f), "systemverilog")
 
     def do_finalize(self):
         self.specials += Instance("rd68031_top", **self.cpu_params)
+        if hasattr(self, "fpu_params"):
+            self.specials += Instance("rd68884_top", **self.fpu_params)

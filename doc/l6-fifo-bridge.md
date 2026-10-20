@@ -82,9 +82,9 @@ waits for the answer once its request has been taken: a deadlock.
 
 ## Resets
 
-- **The FIFOs** are reset by their two clock domains' own resets, which must
-  come together (as from one MMCM's lock). Not `with_common_rst`: see "For
-  upstream".
+- **The bridge**, both halves and both FIFOs, is held in reset while either
+  clock domain is (step 2, below: as first written, each FIFO side had its own
+  domain's reset, which only works when both come out of reset together).
 - **A reset request one sys clock long** (ctrl's `soc_rst`, the BIOS's
   `reboot`) is shorter than a slower CPU clock. In L5's synchronous design the
   board's stretched MMCM reset hid this. In litex_sim, where the CRG has only

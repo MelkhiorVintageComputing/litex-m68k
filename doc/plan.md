@@ -152,7 +152,9 @@ are heavy jobs, run alone.
   any clock, a hard CPU's own later; posted memory writes; burst line fills; main
   RAM on a 128-bit LiteDRAM native port. On the Wukong, memspeed 11.8/9.7 MiB/s
   (L5: 9.2/7.8).
-- Next: a faster CPU clock (now free of sys), then RD68884.
+- *Step 2, done: `doc/l6-fpu.md`.* The CPU on an MMCM of its own, at 30 MHz on the
+  Wukong (memspeed 14.1/11.7 MiB/s), the bridge reset as one across both domains,
+  and RD68884 as the `+fpu` variants (cputest's FPU checks; L3/L4 on the board).
 
 **Later (out of this plan's scope, noted for design choices now):**
 - Linux/buildroot: m68k Linux has no LiteX platform. Options: an `arch/m68k` LiteX
