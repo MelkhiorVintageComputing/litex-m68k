@@ -63,7 +63,9 @@ simulation: 0.9 KiB/s.
     every vector on `trap_catch`, which copies the frame's start and returns to
     `trap_run`'s caller without RTE, so any frame format will do.
   - **instruction cache**: code written as data runs stale until CACR's CI
-    (UM 6.1.1); with no instruction cache (`minimal`), it runs as written.
+    (UM 6.1.1); with no instruction cache (`minimal`), it runs as written. The
+    generated code freezes the cache (CACR FI) between its two runs, so that
+    nothing else evicts its line (L6, `doc/l6-fpu.md`).
   - **MMU** (UM 9): TC `80c08480` (4 KiB pages, TIA 8, TIB 4, TIC 8). Level A
     maps every 16 MiB block onto itself with early termination page
     descriptors (CI from `0x80000000` up), except `0x50xxxxxx`, which goes
@@ -83,8 +85,9 @@ simulation: 0.9 KiB/s.
     and fresh data without it. (The first version of this test expected stale
     data with WA set; RD68031 was right, the test was not.)
   - **FPU** (added in L6, `doc/l6-fpu.md`): FNOP takes the line F exception
-    with no FPU ("fpu: absent"); with RD68884 ("fpu: present"), bit-exact
-    FMUL, FDIV, FSQRT, FINTRZ and FMOVE.L against values computed on the host,
+    with no FPU ("fpu: absent"). C doubles, bit for bit against values computed
+    on the host, on every variant: compiler-rt's soft float without an FPU,
+    the FPU's instructions with one. With RD68884 ("fpu: present"), also FSQRT,
     FMOVECR's pi, FSIN of pi/6, an infinity and FPSR's accrued DZ from a divide
     by zero, the MC68881's idle FSAVE frame ($1F18), and the divide by zero
     again with its exception enabled: taken on the next FPU instruction, a

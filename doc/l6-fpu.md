@@ -81,12 +81,38 @@ The RTL comes from `Inputs/RD68884` (the commit RD68031 itself pins,
 0595f34), copied by `scripts/sync_pythondata.sh` into the same pythondata
 package, `verilog/rd68884/` (`fpu_sources`, `fpu_verilator_config`).
 
-**Floating point in software.** m68k-linux-gnu-gcc defaults to `-m68881`, so C
-code with doubles is FPU code. There is none in the BIOS, the demo or cputest's
-main path (`objdump`: no F-line instruction). cputest's FPU checks are in a
-function of their own, called only once FNOP has shown an FPU, since its
-prologue may save FPU registers. The FPU-less variants keep this default for
-now: a program that uses doubles on them takes line F exceptions.
+**Floating point in software.** m68k-linux-gnu-gcc defaults to `-m68881`: C
+doubles are FPU instructions. The `+fpu` variants keep that. The others build
+with `-msoft-float` (`gcc_flags`), so that every program built against the SoC
+(the BIOS, picolibc, libbase, the demo, cputest) computes in software, from
+LiteX's own compiler-rt: its build, with the CPU's flags, has every routine GCC
+calls (add, subtract, multiply, divide, compare in both precisions, extend,
+truncate, the int conversions). LiteX links with `-nostdlib -nodefaultlibs`,
+so this toolchain's libgcc stays out. It would be wrong here: Debian built it
+for the default, `-m68881`. Its arithmetic routines are integer code, but its
+conversions (`__floatsidf`, `__fixdfsi`, `__extendsfdf2`, `__truncdfsf2`,
+`__fixunsdfsi`, ...) use FPU instructions and return in fp0, and there is no
+soft-float multilib.
+
+Checked: no FPU instruction in the soft-float BIOS, demo or cputest (but FNOP,
+written as words, which is how cputest finds out), and cputest's double checks
+on every variant: multiply, divide, add, the int conversions, comparisons, a
+float divide, an infinity. They are compiled as FPU instructions on `+fpu` and
+as compiler-rt calls elsewhere, with the same bits expected. Its instruction-level
+FPU checks (inline assembly, and `t_fpdz` in `traps.S`, which the assembler
+refuses under `-msoft-float`) are built for `+fpu` only (`__HAVE_68881__`).
+
+Two test fixes came with it:
+
+- **cputest's instruction cache check** ran its generated code twice, expecting
+  the second run to hit the stale line. The cache is 16 lines, direct-mapped by
+  A7-A4, and with compiler-rt linked in, the code run between the two runs
+  shared that line and evicted it: "coherent" on `standard`. The generated code
+  now freezes the cache itself (CACR FI, UM 6.3.1), from its own line, before
+  returning. It also exercises FI.
+- **`l4_test.py`** now builds the demo and cputest from scratch each time.
+  Their Makefiles track sources, not the SoC's flags, and objects built with
+  the old flags had stayed.
 
 ### Results
 
@@ -95,7 +121,8 @@ now: a program that uses doubles on them takes line F exceptions.
 | L3, `standard+fpu` | pass | pass |
 | L4, `standard+fpu` (cputest: 88 checks) | pass; also CPU at 0.3125 MHz with DDR3 | 5/5 |
 | L4, `minimal+fpu` | pass | |
-| L4, FPU-less variants ("fpu: absent") | pass | 5/5 |
+| L4, FPU-less variants ("fpu: absent"; soft float: 82 checks) | pass, `standard` and `minimal` | 5/5, then 3/3 with soft float |
+| L4, `+fpu` variants (92 checks, with the double checks) | pass, `standard+fpu` and `minimal+fpu` | |
 | Timing, worst slack | | 0.034 ns (sys); CPU domain, FPU included, 0.328 ns |
 | Size | | 21,431 LUTs (34 %; the FPU about 4,400), 10 DSPs |
 

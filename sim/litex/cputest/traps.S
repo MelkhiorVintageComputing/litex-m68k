@@ -170,13 +170,15 @@ t_mmu_write_next:
 
 | The FPU (CpID 1, UM 10.1). FNOP: with no FPU, nothing answers its CPU space
 | cycle, the bus error makes it a line F exception (UM 10.1.1); with one, it
-| does nothing.
+| does nothing. As words: the assembler takes no FPU instruction in a
+| -msoft-float build (the FPU-less variants).
         test    t_fnop
 t_fnop_insn:
         .word   0xf280, 0x0000          | fnop
 t_fnop_next:
         rts
 
+#ifdef __HAVE_68881__
 | A divide by zero with its exception enabled (FPCR DZ, FPU 2.2.2): the FPU
 | reports it on the next FPU instruction, with the take pre-instruction
 | exception primitive: a format $0 frame, vector 50, the PC of that instruction
@@ -189,6 +191,7 @@ t_fpdz_insn:
         fnop
 t_fpdz_next:
         rts
+#endif
 
 | Last of all, one exception left to crt0's handler, the program's own (VBR is
 | back to crt0's table by then). It reports it and stops.

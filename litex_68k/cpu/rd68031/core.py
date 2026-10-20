@@ -184,6 +184,13 @@ class RD68031(CPU):
     def gcc_flags(self):
         flags =  "-mcpu=68030 "
         flags += "-D__rd68031__ "
+        # m68k-linux-gnu-gcc's default is -m68881: C doubles are FPU
+        # instructions. Without an FPU, software floating point, from LiteX's
+        # own compiler-rt (soft-float, built with these flags; this
+        # toolchain's libgcc is not: its conversions use the FPU, and return in
+        # fp0). Every program built against the SoC follows these flags.
+        if not CPU_VARIANTS[self.variant]["fpu"]:
+            flags += "-msoft-float "
         return flags
 
     def __init__(self, platform, variant="standard"):

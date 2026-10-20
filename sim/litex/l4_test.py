@@ -45,7 +45,11 @@ def run(cmd, cwd, log, what):
             raise Fail("{} failed (see {})".format(what, log))
 
 def build_programs(soc, out):
-    """The demo and cputest, against the software of the SoC built in `soc`, into `out`."""
+    """The demo and cputest, against the software of the SoC built in `soc`, into `out`.
+    From scratch: their Makefiles track sources, not the SoC's compiler flags
+    (-msoft-float or not), so objects from another SoC's flags would stay."""
+    for d in ("demo", "cputest"):
+        shutil.rmtree(os.path.join(out, d), ignore_errors=True)
     run([sys.executable, "-m", "litex.soc.software.demo.demo", "--build-path", soc], out,
         os.path.join(out, "demo.log"), "the demo")
     ct = os.path.join(out, "cputest")

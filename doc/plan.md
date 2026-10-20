@@ -155,6 +155,7 @@ are heavy jobs, run alone.
 - *Step 2, done: `doc/l6-fpu.md`.* The CPU on an MMCM of its own, at 30 MHz on the
   Wukong (memspeed 14.1/11.7 MiB/s), the bridge reset as one across both domains,
   and RD68884 as the `+fpu` variants (cputest's FPU checks; L3/L4 on the board).
+  The FPU-less variants build with `-msoft-float`, on LiteX's compiler-rt.
 
 **Later (out of this plan's scope, noted for design choices now):**
 - Linux/buildroot: m68k Linux has no LiteX platform. Options: an `arch/m68k` LiteX

@@ -6,16 +6,19 @@
  *   exceptions  every exception a program can cause on purpose, each checked
  *               for its frame format, vector, and the addresses in the frame
  *               (UM 8.1, 8.4)
- *   icache      code written as data runs stale until CACR's CI (UM 6.1.1)
+ *   icache      code written as data runs stale until CACR's CI, the cache
+ *               frozen meanwhile (FI) so that nothing else evicts it (UM 6.1.1)
  *   mmu         a three-level table with early termination: identity mapping
  *               of everything, plus two aliases of one page, a write-protected
  *               alias and an invalid page above them; U and M updates, PTEST,
  *               and the data cache's logical tags seen through the aliases,
  *               with and without write allocation (UM 9, 6.1.2.1)
  *   fpu         whether there is one (FNOP, a line F exception without);
- *               with RD68884: arithmetic, a constant ROM value, a
- *               transcendental, FPSR, an FPU exception and the MC68881's idle
- *               FSAVE frame (FPU 2, 4, 6)
+ *               C doubles, bit for bit: the FPU's with an FPU build (-m68881),
+ *               compiler-rt's without (-msoft-float, the FPU-less variants);
+ *               with RD68884: a constant ROM value, a transcendental, FPSR,
+ *               an FPU exception and the MC68881's idle FSAVE frame
+ *               (FPU 2, 4, 6)
  *
  * The cache checks print what they see ("stale", or "coherent" when a cache
  * is not built in), and the FPU check whether there is one ("fpu: present" or
@@ -152,23 +155,36 @@ static void test_exceptions(void)
 
 static uint16_t code[8] __attribute__((aligned(16)));
 
-static int run_code(void)
+/* Run code[], with d1 = cacr: the code ends with MOVEC D1,CACR. */
+static int run_code(unsigned long cacr)
 {
-	return ((int (*)(void))code)();
+	register unsigned long d1 __asm__("d1") = cacr;
+	register int d0 __asm__("d0");
+	__asm__ __volatile__ ("jsr (%2)" : "=d" (d0) : "d" (d1), "a" (code) : "memory");
+	return d0;
 }
 
+/* The instruction cache is direct-mapped by A7-A4 (UM 6.1.1): any code run
+ * between two runs of code[] on code[]'s line evicts it, which depends on
+ * where the linker put everything. So code[] freezes the cache itself (CACR
+ * FI, UM 6.3.1), from its own line, already loaded: frozen, the cache keeps
+ * its lines, and hits still hit. */
 static void test_icache(void)
 {
 	int f0 = failures, first, second, third;
+	unsigned long cacr = get_cacr();
 
 	code[0] = 0x7001;               /* moveq #1, d0 */
-	code[1] = 0x4e75;               /* rts */
+	code[1] = 0x4e7b;               /* movec d1, cacr */
+	code[2] = 0x1002;
+	code[3] = 0x4e75;               /* rts */
 	flush_cpu_icache();
-	first = run_code();
+	first = run_code(cacr | CACR_FI);
 	code[0] = 0x7002;               /* moveq #2, d0: memory only, the */
-	second = run_code();            /* instruction cache keeps "#1" */
+	second = run_code(cacr | CACR_FI); /* instruction cache keeps "#1" */
+	set_cacr(cacr);                 /* not frozen */
 	flush_cpu_icache();
-	third = run_code();
+	third = run_code(cacr);
 
 	CHECK(first == 1, "icache", "first run returned %u", first);
 	CHECK(second == 1 || second == 2, "icache", "second run returned %u", second);
@@ -347,9 +363,10 @@ static void test_mmu(void)
 
 /* --- FPU ------------------------------------------------------------------- */
 
-/* Built with the cross-compiler's default, -m68881: the doubles below are FPU
- * instructions, run only once FNOP has shown there is an FPU. Results are
- * compared bit for bit, as doubles. */
+/* Doubles in C: FPU instructions in an FPU build (__HAVE_68881__, the
+ * cross-compiler's default, the +fpu variants), compiler-rt's soft float
+ * otherwise. Either way IEEE double, so the same bits, computed here on the
+ * host. FPU builds run them only once FNOP has shown an FPU. */
 
 static uint64_t bits(double d)
 {
@@ -365,11 +382,30 @@ static uint64_t bits(double d)
 			(unsigned)((want) >> 32), (unsigned)(want));    \
 	} while (0)
 
-/* volatile: computed at run time, by the FPU, not by the compiler. */
+/* volatile: computed at run time, not by the compiler. */
 static volatile double one = 1.0, two = 2.0, three = 3.0, x15 = 1.5, x225 = 2.25;
 static volatile double m75 = -7.5;
 static volatile int i123 = 123456789;
+static volatile float f1 = 1.0f, f3 = 3.0f;
 
+/* Not inlined: in an FPU build, its prologue may save FPU registers, which
+ * only an FPU can. */
+static void __attribute__((noinline)) double_checks(void)
+{
+	volatile float q;
+
+	CHECK_BITS(x15 * x225, 0x400b000000000000ULL, "double mul");      /* 3.375 */
+	CHECK_BITS(one / three, 0x3fd5555555555555ULL, "double div");     /* 1/3 */
+	CHECK_BITS(one - x225 + two, 0x3fe8000000000000ULL, "double add"); /* 0.75 */
+	CHECK((int)m75 == -7, "double to int", "%d", (int)m75);
+	CHECK_BITS((double)i123, 0x419d6f3454000000ULL, "int to double");
+	CHECK(m75 < one && !(one < m75) && x15 != x225, "double compare", "wrong");
+	q = f1 / f3;                    /* stored: rounded to float */
+	CHECK_BITS((double)q, 0x3fd5555560000000ULL, "float div, to double");
+	CHECK_BITS(one / (one - one), 0x7ff0000000000000ULL, "double div by 0");
+}
+
+#ifdef __HAVE_68881__
 static void frestore_null(void)
 {
 	/* A null frame resets the FPU (FPU 6.4.2): FPCR, FPSR, any exception. */
@@ -383,12 +419,8 @@ static void __attribute__((noinline)) fpu_checks(void)
 	double d;
 	uint32_t fpsr, frame[64];
 
-	CHECK_BITS(x15 * x225, 0x400b000000000000ULL, "fmul");          /* 3.375 */
-	CHECK_BITS(one / three, 0x3fd5555555555555ULL, "fdiv");         /* 1/3 */
 	__asm__ __volatile__ ("fsqrt.x %1, %0" : "=f" (d) : "f" (two));
 	CHECK_BITS(d, 0x3ff6a09e667f3bcdULL, "fsqrt");
-	CHECK((int)m75 == -7, "fintrz", "%d", (int)m75);
-	CHECK_BITS((double)i123, 0x419d6f3454000000ULL, "fmove.l");
 	__asm__ __volatile__ ("fmovecr #0, %0" : "=f" (d));            /* pi */
 	CHECK_BITS(d, 0x400921fb54442d18ULL, "fmovecr pi");
 	__asm__ __volatile__ ("fsin.x %1, %0" : "=f" (d) : "f" (d / 6.0));
@@ -414,6 +446,7 @@ static void __attribute__((noinline)) fpu_checks(void)
 	expect("fpu divide by zero", t_fpdz, 0x00c8, t_fpdz_insn, 0);
 	frestore_null();
 }
+#endif
 
 static void test_fpu(void)
 {
@@ -421,14 +454,22 @@ static void test_fpu(void)
 
 	if (got == 0x002c) {
 		printf("fpu: absent\n");
+#ifndef __HAVE_68881__
+		double_checks();        /* soft float */
+#endif
 		return;
 	}
 	CHECK(got == 0, "fnop", "format/vector %04x", got);
 	if (got)
 		return;
 	printf("fpu: present\n");
+#ifdef __HAVE_68881__
 	frestore_null();
+	double_checks();
 	fpu_checks();
+#else
+	double_checks();        /* soft float, though there is an FPU */
+#endif
 }
 
 /* --- Main ------------------------------------------------------------------ */
