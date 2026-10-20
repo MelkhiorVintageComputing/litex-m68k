@@ -108,7 +108,7 @@ and a dedicated bus test: every SIZ/A1:A0 combination, misaligned operands (dyna
 sizing), RMW (TAS/CAS), BERR on unmapped, IACK/autovector, CIIN on IO. Optionally a
 WB protocol checker.
 
-**L2 — LiteX CPU class, sim, no BIOS.** `litex_68k/cpu/rd68031/core.py`:
+**L2 — LiteX CPU class, sim, no BIOS.** *Done: `doc/l2-litex.md`.* `litex_68k/cpu/rd68031/core.py`:
 `family="m68k"`, `endianness="big"`, `data_width=32`,
 `gcc_triple=("m68k-elf","m68k-linux-gnu")`, `gcc_flags="-mcpu=68030 -D__rd68031__"`,
 `linker_output_format="elf32-m68k"`, `nop="nop"`, `io_regions={0x8000_0000:0x8000_0000}`,
