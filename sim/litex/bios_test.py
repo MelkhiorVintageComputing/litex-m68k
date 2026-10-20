@@ -28,7 +28,7 @@ import re
 import sys
 import zlib
 
-from simtest import pacing, Fail, PROMPT, check, serial_console, sim_command, socket_console, start, stop
+from simtest import add_sim_options, sim_build_name, sim_options, Fail, PROMPT, check, serial_console, sim_command, socket_console, start, stop
 
 def csr_ident(build):
     for line in open(os.path.join(build, "csr.csv")):
@@ -41,15 +41,14 @@ def main():
     parser = argparse.ArgumentParser(description="L3: the LiteX BIOS on RD68031, under litex_sim.")
     parser.add_argument("--variant",   default="standard", help="CPU variant.")
     parser.add_argument("--port",      default=2430, type=int, help="TCP port for the UART.")
-    parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/bios).")
-    parser.add_argument("--uart-tx-clocks", default=None,
-        help="Simulation: pace the UART's transmit side, a byte every N clocks (targets/sim.py).")
+    parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/bios, with the simulation options in its name).")
+    add_sim_options(parser)
     parser.add_argument("--serial",    default=None,
         help="A board's serial port (e.g. /dev/ttyUSB0) instead of the simulation: the board runs "
              "the SoC built in --build-dir, its BIOS at the prompt.")
     args = parser.parse_args()
 
-    build = args.build_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", args.variant, "bios")
+    build = args.build_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", args.variant, sim_build_name(args, "bios"))
     os.makedirs(build, exist_ok=True)
     sim = None
     try:
@@ -57,7 +56,7 @@ def main():
             con = serial_console(args.serial, sys.stdout)
             con.prompt()
         else:
-            sim = start(sim_command(args.variant, build, args.port, pacing(args)), open(os.path.join(build, "sim.log"), "w"))
+            sim = start(sim_command(args.variant, build, args.port, sim_options(args)), open(os.path.join(build, "sim.log"), "w"))
             con = socket_console(args.port, sys.stdout, sim)
             con.expect(re.escape(PROMPT), 900)
 

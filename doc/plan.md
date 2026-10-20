@@ -86,8 +86,8 @@ scripts/                       setup_venv.sh, sync_pythondata.sh
   `get_data_mod("cpu", "rd68031")`.
 - CPU registration: target scripts import our class and set
   `litex.soc.cores.cpu.CPUS["rd68031"]` before argument parsing — no LiteX patch.
-- Licensing note: RD68031 is CERN-OHL-S-2.0; the wrapper/bridge licence should be
-  chosen accordingly (decide when creating files).
+- Licensing: RD68031 is CERN-OHL-S-2.0; our own files (wrapper, bridges, targets,
+  tests) are BSD-2-Clause, as LiteX is (confirmed by the user, 2026-10-20).
 
 ## Milestones
 
@@ -147,6 +147,12 @@ are heavy jobs, run alone.
 **L6 — Performance & FPU (optional).** STERM termination, burst fills into LiteDRAM,
 `memory_buses` direct to LiteDRAM; RD68884 at CPU-space CpID 1 with `COPROCESSOR=1`
 (`+fpu` variant), mirroring `sim/mame/rd68031_fpu.sv`.
+- *Step 1, done: `doc/l6-fifo-bridge.md`.* The CPU's clock decoupled from sys by a
+  FIFO bridge (requests one way, lines of 128 bits and tags the other), so it may be
+  any clock, a hard CPU's own later; posted memory writes; burst line fills; main
+  RAM on a 128-bit LiteDRAM native port. On the Wukong, memspeed 11.8/9.7 MiB/s
+  (L5: 9.2/7.8).
+- Next: a faster CPU clock (now free of sys), then RD68884.
 
 **Later (out of this plan's scope, noted for design choices now):**
 - Linux/buildroot: m68k Linux has no LiteX platform. Options: an `arch/m68k` LiteX

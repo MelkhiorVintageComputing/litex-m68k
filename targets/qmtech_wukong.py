@@ -13,13 +13,17 @@ Two configurations (doc/l5-wukong.md):
 - DDR3 main RAM (the default): the SoC at --sys-clk-freq (100 MHz), which
   LiteDRAM's Artix-7 PHY needs, and the CPU at --cpu-clk-freq (25 MHz; RD68031
   makes about 29.6 MHz on an Artix-7) in a clock domain of its own, from the
-  same MMCM, a whole fraction of sys, its bus crossing to sys synchronously
-  (core.py). Output: build/qmtech_wukong.
+  same MMCM. The bus crosses to sys through FIFOs (litex_68k/m68030_fifo.py),
+  so any frequency the MMCM makes will do; with --bus-bridge sync (core.py),
+  the CPU's clock must be a whole fraction of sys. Main RAM is on a LiteDRAM
+  native port of the CPU's own (128 bits: the DDR3 is 16 bits, 1:4). Output:
+  build/qmtech_wukong (build/qmtech_wukong_sync with --bus-bridge sync).
 - --integrated-main-ram-size N: block RAM instead, and one clock for all, the
   CPU's. Output: build/qmtech_wukong_bram.
 
 Defaults that differ from litex-boards': --cpu-type rd68031, --revision 3,
 --timer-uptime, the clocks above, and the output directory, in this repository.
+--bus-bridge (fifo or sync, RD68031.bus_bridge) is ours.
 --load uses Vivado's hardware manager (the board's JTAG here is a Xilinx
 Platform Cable, which litex-boards' OpenOCD configuration does not drive).
 """
@@ -115,7 +119,6 @@ def cpu_clock_domain(qmtech_wukong, cpu_clk_freq):
     """RD68031 in a "cpu" clock domain, one more output of litex-boards' main MMCM."""
     crg(qmtech_wukong, cpu_clk_freq)
     RD68031.clock_domain = "cpu"
-    RD68031.clock_synchronous = True            # one MMCM, an integer ratio (main())
 
 def main():
     register()
@@ -128,13 +131,17 @@ def main():
     load = "--load" in argv
     argv = [a for a in argv if a != "--load"]
     cpu_clk_freq = float(get_option(argv, "--cpu-clk-freq", "25e6", remove=True))
+    RD68031.bus_bridge = get_option(argv, "--bus-bridge", RD68031.bus_bridge, remove=True)
     ddr3 = get_option(argv, "--integrated-main-ram-size") is None
+    name = "qmtech_wukong" if ddr3 else "qmtech_wukong_bram"
+    if RD68031.bus_bridge != "fifo":
+        name += "_" + RD68031.bus_bridge
 
     defaults = [
         ("--cpu-type",     "rd68031"),
         ("--revision",     "3"),
         ("--sys-clk-freq", "100e6" if ddr3 else str(cpu_clk_freq)),
-        ("--output-dir",   os.path.join(TOP, "build", "qmtech_wukong" if ddr3 else "qmtech_wukong_bram")),
+        ("--output-dir",   os.path.join(TOP, "build", name)),
     ]
     for opt, value in defaults:
         if get_option(argv, opt) is None:
@@ -146,10 +153,11 @@ def main():
     from litex_boards.targets import qmtech_wukong
     sys_clk_freq = float(get_option(argv, "--sys-clk-freq"))
     if sys_clk_freq != cpu_clk_freq:
-        # WishboneSyncCrossing (core.py) needs the CPU's clock to be sys's
-        # divided by an integer.
-        ratio = sys_clk_freq / cpu_clk_freq
-        assert ratio == int(ratio), "--sys-clk-freq must be a multiple of --cpu-clk-freq"
+        if RD68031.bus_bridge == "sync":
+            # WishboneSyncCrossing (core.py) needs the CPU's clock to be sys's
+            # divided by an integer.
+            ratio = sys_clk_freq / cpu_clk_freq
+            assert ratio == int(ratio), "--sys-clk-freq must be a multiple of --cpu-clk-freq"
         cpu_clock_domain(qmtech_wukong, cpu_clk_freq)
     else:
         crg(qmtech_wukong)

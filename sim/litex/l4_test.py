@@ -33,7 +33,7 @@ import subprocess
 import sys
 import time
 
-from simtest import pacing, Fail, PROMPT, TOP, check, fd_console, sim_command, start, stop, venv_env, wait_listening
+from simtest import add_sim_options, sim_build_name, sim_options, Fail, PROMPT, TOP, check, fd_console, sim_command, start, stop, venv_env, wait_listening
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOAD = 0x40000000
@@ -71,22 +71,21 @@ def main():
     parser = argparse.ArgumentParser(description="L4: bare-metal programs on RD68031, under litex_sim.")
     parser.add_argument("--variant",   default="standard", help="CPU variant.")
     parser.add_argument("--port",      default=2431, type=int, help="TCP port for the UART.")
-    parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/l4).")
-    parser.add_argument("--uart-tx-clocks", default=None,
-        help="Simulation: pace the UART's transmit side, a byte every N clocks (targets/sim.py).")
+    parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/l4, with the simulation options in its name).")
+    add_sim_options(parser)
     parser.add_argument("--serial",    default=None,
         help="A board's serial port (e.g. /dev/ttyUSB0) instead of the simulation: the board runs "
              "the SoC built in --build-dir, its BIOS at the prompt; the programs go to <build-dir>/l4.")
     args = parser.parse_args()
 
-    build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant, "l4"))
+    build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant, sim_build_name(args, "l4")))
     out = os.path.join(build, "l4") if args.serial else build
     os.makedirs(out, exist_ok=True)
     sim = term = None
     try:
         if not args.serial:
             # The SoC's software, for the programs to build against.
-            run(sim_command(args.variant, build, 0, ["--no-compile-gateware"]), build,
+            run(sim_command(args.variant, build, 0, ["--no-compile-gateware"] + sim_options(args)), build,
                 os.path.join(build, "software.log"), "the SoC's software")
         demo, cputest = build_programs(build, out)
         boot = os.path.join(out, "boot.bin")
@@ -95,7 +94,7 @@ def main():
         if args.serial:
             port, options = args.serial, []
         else:
-            sim = start(sim_command(args.variant, build, args.port, pacing(args)), open(os.path.join(build, "sim.log"), "w"))
+            sim = start(sim_command(args.variant, build, args.port, sim_options(args)), open(os.path.join(build, "sim.log"), "w"))
             wait_listening(args.port, sim)
             port = "socket://127.0.0.1:{}".format(args.port)
             # 64-byte frames: the simulated UART has no baud rate, a longer

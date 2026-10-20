@@ -6,6 +6,8 @@
 #   make check          every program, both cache configurations
 #   make run PROG=x     one program (bustest, arith)
 #   make CACHES=0 ...   the core built with no caches (ICACHE/DCACHE_ENTRIES=0)
+#   make BRIDGE=fifo ...  M68030ToFIFOToSoC, the processor on a clock of its own
+#                       (PLUSARGS=+cpu_half=<ns> sets it; sys's is 5)
 #
 # Needs the venv (scripts/setup_venv.sh) and ../pythondata-cpu-rd68031
 # (scripts/sync_pythondata.sh). The Verilator build of the core is a heavy job:
@@ -15,12 +17,14 @@ TOP     := $(abspath ../..)
 CROSS   ?= m68k-linux-gnu-
 PYTHON  ?= $(HOME)/LITEX-68K/litex-venv/bin/python
 CACHES  ?= 64
-BUILD   := build/caches$(CACHES)
+BRIDGE  ?= wishbone
+BUILD   := build/$(BRIDGE)-caches$(CACHES)
 PROGDIR := build/programs
 
 RD68031_V := $(abspath $(TOP)/../pythondata-cpu-rd68031/pythondata_cpu_rd68031/verilog)
 RD68031_SRCS := $(addprefix $(RD68031_V)/,$(shell cat $(RD68031_V)/rd68031.f))
-BRIDGE := $(TOP)/litex_68k/m68030_bus.py
+BRIDGE_SRCS := $(TOP)/litex_68k/m68030_bus.py $(TOP)/litex_68k/m68030_fifo.py $(TOP)/litex_68k/cpu/rd68031/core.py
+VDEFS   := $(if $(filter fifo,$(BRIDGE)),-DFIFO_BRIDGE)
 
 # Programs, and the RESULT each must write.
 PROGS          := bustest arith
@@ -38,7 +42,7 @@ LDFLAGS := -nostdlib -nostartfiles -Wl,--build-id=none,--no-warn-rwx-segments -T
 
 check: $(BUILD)/Vtb $(addprefix $(PROGDIR)/,$(addsuffix .hex,$(PROGS)))
 	@fail=0; for p in $(PROGS); do \
-	    printf '%-8s caches=%-3s ' $$p $(CACHES); \
+	    printf '%-8s %s caches=%-3s ' $$p $(BRIDGE) $(CACHES); \
 	    if $(MAKE) --no-print-directory -s run PROG=$$p > $(BUILD)/$$p.log 2>&1; \
 	    then grep -h '^EXIT' $(BUILD)/$$p.log | sed 's/^EXIT [0-9a-f]* after/PASS,/'; \
 	    else echo "FAIL (see sim/bench/$(BUILD)/$$p.log)"; fail=1; fi; \
@@ -48,12 +52,12 @@ run: $(BUILD)/Vtb $(PROGDIR)/$(PROG).hex
 	$(BUILD)/Vtb +ram=$(PROGDIR)/$(PROG).hex +expect=$(EXPECT_$(PROG)) $(PLUSARGS)
 
 # The bench's Verilog, then the simulator.
-$(BUILD)/bench.v: bench.py $(BRIDGE)
+$(BUILD)/bench.v: bench.py $(BRIDGE_SRCS)
 	@mkdir -p $(BUILD)
-	$(PYTHON) bench.py --output $@ --icache $(CACHES) --dcache $(CACHES)
+	$(PYTHON) bench.py --output $@ --icache $(CACHES) --dcache $(CACHES) --bridge $(BRIDGE)
 
 $(BUILD)/Vtb: tb.sv $(BUILD)/bench.v $(RD68031_SRCS)
-	verilator --binary --timing -j 4 -Wno-fatal -Wno-lint -Wno-style \
+	verilator --binary --timing -j 4 -Wno-fatal -Wno-lint -Wno-style $(VDEFS) \
 	    --top-module tb --Mdir $(BUILD)/obj -o ../Vtb \
 	    $(RD68031_V)/rtl/rd68031.vlt $(RD68031_SRCS) $(BUILD)/bench.v tb.sv \
 	    > $(BUILD)/verilator.log 2>&1 || { tail -30 $(BUILD)/verilator.log; exit 1; }

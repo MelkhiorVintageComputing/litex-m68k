@@ -21,18 +21,21 @@ Clocking: the core and its bridge run in `RD68031.clock_domain`, "sys" unless a
 target says otherwise. RD68031 makes about 30 MHz on an Artix-7, and LiteDRAM's
 Artix-7 PHY wants sys at 75 MHz or more: a board target with DDR3 sets
 clock_domain = "cpu" and provides that clock domain (50 % duty cycle: the core
-uses both edges). The bus then crosses to sys:
+uses both edges). The bus then crosses to sys, by `RD68031.bus_bridge`:
 
-- clock_synchronous = True (the default): the CPU's clock is sys's divided by an
-  integer, edges aligned (two outputs of one MMCM). WishboneSyncCrossing
-  answers within a CPU clock or two, which matters: the instruction cache is
-  256 bytes, so the BIOS runs mostly from the ROM, through the crossing.
-- clock_synchronous = False: any two clocks, through wishbone.ClockDomainCrossing
-  (asynchronous FIFOs, several clocks each way). The bridge's own time-out is
-  then off, since it would leave the crossing waiting for the answer to an
-  abandoned access and the next access behind it; WishboneErrorTimeout on the
-  sys side ends such an access instead. LiteX's own bus time-out does not do:
-  it answers with all ones and an ack, not an error.
+- "fifo" (the default): M68030ToFIFOToSoC (litex_68k/m68030_fifo.py), requests
+  and answers through asynchronous FIFOs, so the CPU's clock may be any clock.
+  Cache line fills are bursts, and with a LiteDRAM controller 128 bits wide
+  (add_memory_buses), main RAM is read a line at a time on a native port of
+  its own. Writes outside io_regions are posted.
+- "sync": M68030ToWishbone, a Wishbone cycle per bus cycle, and, if the CPU has
+  a clock domain of its own, WishboneSyncCrossing, which needs the CPU's clock
+  to be sys's divided by an integer, edges aligned (two outputs of one MMCM).
+
+An access nobody answers is a bus error after BUS_TIMEOUT clocks: the bridge's
+own time-out with "sync", WishboneErrorTimeout on the sys side with "fifo".
+LiteX's own bus time-out does not do: it answers with all ones and an ack, not
+an error.
 """
 
 import os
@@ -49,6 +52,7 @@ from litex.soc.interconnect.csr import CSRStatus, CSRStorage
 from litex.soc.cores.cpu import CPU
 
 from litex_68k.m68030_bus import m68030_bus_layout, M68030ToWishbone
+from litex_68k.m68030_fifo import M68030ToFIFOToSoC
 
 # Variants -----------------------------------------------------------------------------------------
 
@@ -159,7 +163,7 @@ class RD68031(CPU):
     nop                  = "nop"
     io_regions           = {0x8000_0000: 0x8000_0000} # Origin, Length: uncached (CIIN).
     clock_domain         = "sys"                      # See the module's docstring.
-    clock_synchronous    = True
+    bus_bridge           = "fifo"                     # Or "sync" (idem).
 
     # Memory Mapping: the reset vectors are read at 0 (UM 8.1.1), so the ROM is there.
     @property
@@ -192,20 +196,17 @@ class RD68031(CPU):
         # The MC68030 bus, and the bridge to Wishbone, in the CPU's clock domain.
         cd   = self.clock_domain
         m68k = Record(m68030_bus_layout)
-        if cd == "sys":
+        if self.bus_bridge == "fifo":
+            sys_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.bridge  = M68030ToFIFOToSoC(m68k, sys_bus, cd=cd, io_regions=self.io_regions)
+            self.timeout = WishboneErrorTimeout(sys_bus, self.bus, BUS_TIMEOUT)
+        elif cd == "sys":
             self.bridge = M68030ToWishbone(m68k, self.bus, io_regions=self.io_regions)
-        elif self.clock_synchronous:
+        else:
             cpu_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
             self.bridge = ClockDomainsRenamer(cd)(
                 M68030ToWishbone(m68k, cpu_bus, io_regions=self.io_regions))
             self.cdc = WishboneSyncCrossing(cpu_bus, self.bus, cd)
-        else:
-            cpu_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
-            self.bridge = ClockDomainsRenamer(cd)(
-                M68030ToWishbone(m68k, cpu_bus, io_regions=self.io_regions, timeout=None))
-            sys_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
-            self.cdc     = wishbone.ClockDomainCrossing(cpu_bus, sys_bus, cd_from=cd, cd_to="sys")
-            self.timeout = WishboneErrorTimeout(sys_bus, self.bus, BUS_TIMEOUT)
 
         # Interrupts: every unmasked line raises IRQ_LEVEL.
         self.irq_pending = CSRStatus(32, description="Interrupt lines, as they are.")
@@ -217,12 +218,39 @@ class RD68031(CPU):
         self.comb += self.irq_pending.status.eq(self.interrupt)
         self.sync += ipl.eq(Mux((self.interrupt & self.irq_mask.storage) != 0, IRQ_LEVEL, 0))
 
-        # The reset request (sys) as the CPU's clock domain sees it.
+        # The reset request (sys) as the CPU's clock domain sees it. A request
+        # may be one sys clock long (ctrl's soc_rst), which a slower CPU clock
+        # would miss: its start crosses as a toggle, and holds the CPU in reset
+        # for RESET_CLOCKS of its own clocks; a longer request (cpu_rst)
+        # crosses as it is too.
         reset = Signal()
         if cd == "sys":
             self.comb += reset.eq(self.reset)
         else:
-            self.specials += MultiReg(self.reset, reset, cd)
+            RESET_CLOCKS = 8
+            reset_q  = Signal()
+            toggle   = Signal(reset_less=True)
+            level    = Signal()
+            seen     = Signal()
+            seen_q   = Signal()
+            count    = Signal(max=RESET_CLOCKS + 1)
+            self.sync += [
+                reset_q.eq(self.reset),
+                If(self.reset & ~reset_q, toggle.eq(~toggle)),
+            ]
+            self.specials += [
+                MultiReg(self.reset, level, cd),
+                MultiReg(toggle,     seen,  cd),
+            ]
+            getattr(self.sync, cd).__iadd__([
+                seen_q.eq(seen),
+                If(seen != seen_q,
+                    count.eq(RESET_CLOCKS)
+                ).Elif(count != 0,
+                    count.eq(count - 1)
+                ),
+            ])
+            self.comb += reset.eq(level | (count != 0))
 
         reset_n_oe = Signal()
         self.cpu_params = dict(
@@ -285,6 +313,22 @@ class RD68031(CPU):
 
         # Add Verilog sources.
         self.add_sources(platform)
+
+    def add_soc_components(self, soc):
+        # Main RAM's region, once add_sdram has made it (add_memory_buses).
+        self.soc_regions = soc.bus.regions
+
+    def add_memory_buses(self, address_width, data_width):
+        """Main RAM on a LiteDRAM native port of the bridge's own, when the
+        controller is a line wide (the Wukong's DDR3); otherwise through the
+        SoC's bus, as for any other memory."""
+        if self.bus_bridge != "fifo" or data_width != 128:
+            return
+        from litedram.common import LiteDRAMNativePort
+        region = self.soc_regions["main_ram"]
+        port   = LiteDRAMNativePort(mode="both", address_width=address_width - 4, data_width=data_width)
+        self.bridge.add_native_port(port, region.origin, region.size)
+        self.memory_buses.append(port)
 
     def set_reset_address(self, reset_address):
         # The MC68030 always reads its reset vectors at 0 (UM 8.1.1).

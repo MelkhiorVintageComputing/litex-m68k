@@ -33,7 +33,8 @@ must later drive a real MC68030.
 ### Mind the host's memory
 
 15 GB, no swap. Heavy jobs (Verilator builds of the core, Vivado, Linux builds) run one
-at a time, with `-j4` at most.
+at a time, with `-j4` at most. Simulations already built, on one CPU and with little
+memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 
 ## Layout
 
@@ -41,13 +42,14 @@ at a time, with `-j4` at most.
 |---|---|
 | `doc/plan.md` | the plan: milestones L0-L6 and why |
 | `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), and the Motorola and board documentation (add-only) |
-| `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, the bridge |
-| `sim/bench/` | L1: core + bridge + Wishbone RAM, no LiteX SoC (`make -C sim/bench check`; `doc/l1-bench.md`) |
+| `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, L1-L5's bridge (`RD68031.bus_bridge = "sync"`) |
+| `litex_68k/m68030_fifo.py` | L6: the FIFO bridge, the default: the CPU on any clock, burst line fills, main RAM on a 128-bit LiteDRAM port (`doc/l6-fifo-bridge.md`) |
+| `sim/bench/` | L1: core + bridge + Wishbone RAM, no LiteX SoC (`make -C sim/bench check`, `BRIDGE=fifo` for L6's on a CPU clock of its own; `doc/l1-bench.md`) |
 | `litex_68k/cpu/rd68031/` | the LiteX CPU class and its software files (`litex_68k.cpu.register()`; `doc/l2-litex.md`) |
-| `targets/sim.py` | `litex_sim` with RD68031 (`--uart-tx-clocks` paces its UART like a baud rate) |
+| `targets/sim.py` | `litex_sim` with RD68031 (`--uart-tx-clocks` paces its UART like a baud rate; `--cpu-clk-freq` puts the CPU on a clock of its own) |
 | `sim/unit/` | migen unit tests of `core.py`'s bus crossing and time-out, two clocks, in migen's simulator: no Verilator build (`make -C sim/unit check`) |
-| `targets/qmtech_wukong.py` | L5: the Wukong V3 board, DDR3 (CPU 25 MHz, SoC 100 MHz) or block RAM, `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
-| `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`) |
+| `targets/qmtech_wukong.py` | L5: the Wukong V3 board, DDR3 (CPU 25 MHz, SoC 100 MHz) or block RAM, `--bus-bridge fifo` (default) or `sync`, `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
+| `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`); the tests take `--cpu-clk-freq` and `--sdram` (DDR3, 128-bit native port) |
 | `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
 | `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031` |

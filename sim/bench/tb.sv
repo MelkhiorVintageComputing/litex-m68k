@@ -9,6 +9,8 @@
 //   +expect=<hex>    the value the program must write to RESULT
 //   +max_cycles=<n>  give up after n clocks (default 50,000,000)
 //   +vcd=<file>      dump a VCD
+//   +cpu_half=<ns>   with FIFO_BRIDGE defined (bench.py --bridge fifo): half the
+//                    period of the processor's clock (default 17.3; sys: 5)
 //
 // The verdict is the last line: "PASS", or "FAIL: <why>". Exit status 0 for PASS.
 
@@ -21,8 +23,18 @@ module tb;
     logic        tty_stb, exit_stb, result_stb;
     logic [31:0] exit_code, result;
 
+`ifdef FIFO_BRIDGE
+    logic        cpu_clk = 1'b0;
+    real         cpu_half;
+    initial if (!$value$plusargs("cpu_half=%f", cpu_half)) cpu_half = 17.3;
+    always #(cpu_half) cpu_clk = ~cpu_clk;
+`endif
+
     bench dut (
         .sys_clk(clk), .sys_rst(rst),
+`ifdef FIFO_BRIDGE
+        .cpu_clk(cpu_clk), .cpu_rst(rst),
+`endif
         .tty_stb(tty_stb), .tty_data(tty_data),
         .exit_stb(exit_stb), .exit_code(exit_code),
         .result_stb(result_stb), .result(result)

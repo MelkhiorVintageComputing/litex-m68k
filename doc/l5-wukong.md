@@ -1,5 +1,9 @@
 # L5: RD68031 on the QMTech Wukong
 
+*Since L6, the default bus bridge is the FIFO one (`doc/l6-fifo-bridge.md`), and the
+builds described here are `--bus-bridge sync`, in `build/qmtech_wukong_sync` and
+`build/qmtech_wukong_bram_sync`; the same commands without it build L6's.*
+
 Milestone L5 of `doc/plan.md`, on the board: a Wukong V3 (xc7a100t, FGG676),
 its JTAG on a Xilinx Platform Cable USB II, its UART on a CH340
 (`/dev/ttyUSB0`).

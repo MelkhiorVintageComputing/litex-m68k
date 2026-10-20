@@ -27,20 +27,47 @@ def check(cond, what):
 
 # The simulation ------------------------------------------------------------------------------------
 
+# DDR3 as on the Wukong: 16 bits, 1:4, so LiteDRAM's port is 128 bits wide, a
+# cache line, and RD68031's FIFO bridge reads main RAM on a native port.
+SDRAM = ["--with-sdram", "--sdram-module", "MT41K128M16", "--sdram-data-width", "16"]
+
+def add_sim_options(parser):
+    """The options of a test that change the simulated SoC (sim_options)."""
+    parser.add_argument("--uart-tx-clocks", default=None,
+        help="Simulation: pace the UART's transmit side, a byte every N clocks (targets/sim.py).")
+    parser.add_argument("--cpu-clk-freq", default=None,
+        help="Simulation: the CPU on a clock of its own, in Hz, sys being 1 MHz (targets/sim.py).")
+    parser.add_argument("--sdram", action="store_true",
+        help="Simulation: main RAM in simulated DDR3, on LiteDRAM, instead of block RAM.")
+
+def sim_options(args):
+    """targets/sim.py's options for add_sim_options's."""
+    options = []
+    if getattr(args, "uart_tx_clocks", None):
+        options += ["--uart-tx-clocks", str(args.uart_tx_clocks)]
+    if args.cpu_clk_freq:
+        options += ["--cpu-clk-freq", str(args.cpu_clk_freq)]
+    if args.sdram:
+        options += SDRAM
+    return options
+
+def sim_build_name(args, name):
+    """A build directory's name for add_sim_options's: they change the SoC."""
+    return name + ("-cpu" + str(args.cpu_clk_freq) if args.cpu_clk_freq else "") + \
+        ("-sdram" if args.sdram else "")
+
 def sim_command(variant, build, port, extra=()):
-    """targets/sim.py with the BIOS, the UART on TCP port `port`."""
+    """targets/sim.py with the BIOS, the UART on TCP port `port`; main RAM in
+    block RAM unless `extra` has SDRAM."""
+    ram = [] if "--with-sdram" in extra else ["--integrated-main-ram-size", "0x10000"]
     return [sys.executable, os.path.join(TOP, "targets", "sim.py"),
         "--cpu-variant", variant,
         "--output-dir", build,
-        "--integrated-main-ram-size", "0x10000",
+        *ram,
         "--sim-debug",
         "--timer-uptime",                       # for the uptime command
         "--uart-tcp", "--uart-tcp-port", str(port),
         "--non-interactive", *extra]
-
-def pacing(args):
-    """The targets/sim.py options for a test's --uart-tx-clocks."""
-    return ["--uart-tx-clocks", str(args.uart_tx_clocks)] if args.uart_tx_clocks else []
 
 def venv_env():
     # The build runs tools from the venv (meson, ninja) whether it is activated or not.

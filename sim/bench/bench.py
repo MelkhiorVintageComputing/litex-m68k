@@ -4,15 +4,19 @@
 
 """L1 bench: RD68031 + M68030ToWishbone + Wishbone RAM and test devices, no LiteX SoC.
 
-Generates bench.v, the top that tb.sv instantiates. The map:
+Generates bench.v, the top that tb.sv instantiates. With --bridge fifo, the
+bridge is M68030ToFIFOToSoC instead (litex_68k/m68030_fifo.py), the processor
+on a clock of its own ("cpu"), unrelated to sys, where everything else is. The map:
 
     $0000_0000  RAM (--ram-size), loaded at run time from the file named by the
                 +ram= plusarg (one 32-bit big-endian word per line, $readmemh)
     $E000_0000  a slave that answers every access with a Wishbone error
     $F000_0000  the test device, below
-    elsewhere   nothing: the bridge times out and asserts BERR
+    elsewhere   nothing: the bridge (or, with the FIFOs, WishboneErrorTimeout)
+                times out and asserts BERR
 
-$E000_0000-$FFFF_FFFF is the I/O region: the bridge asserts CIIN there.
+$8000_0000-$FFFF_FFFF is the I/O region, as in the LiteX SoC: the bridge asserts
+CIIN there, and M68030ToFIFO does not post writes there.
 
 The test device, word registers:
 
@@ -34,7 +38,11 @@ from litex.gen.fhdl.verilog import convert
 
 from litex.soc.interconnect import wishbone
 
+from litex.build.sim.common import sim_special_overrides
+
 from litex_68k.m68030_bus import m68030_bus_layout, M68030ToWishbone
+from litex_68k.m68030_fifo import M68030ToFIFOToSoC
+from litex_68k.cpu.rd68031.core import WishboneErrorTimeout
 
 # Test device --------------------------------------------------------------------------------------
 
@@ -94,13 +102,25 @@ class ErrorSlave(LiteXModule):
 # Bench --------------------------------------------------------------------------------------------
 
 class Bench(LiteXModule):
-    def __init__(self, ram_size=0x40000, icache=64, dcache=64, timeout=256):
+    def __init__(self, ram_size=0x40000, icache=64, dcache=64, timeout=256, bridge="wishbone"):
         self.cd_sys = ClockDomain()
+        cd = "sys"
+        if bridge == "fifo":
+            self.cd_cpu = ClockDomain()
+            cd = "cpu"
 
         # # #
 
         bus = Record(m68030_bus_layout)
-        self.bridge = M68030ToWishbone(bus, io_regions={0xE000_0000: 0x2000_0000}, timeout=timeout)
+        io_regions = {0x8000_0000: 0x8000_0000}  # As LiteX's, for RD68031.
+        if bridge == "fifo":
+            wb = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.bridge  = M68030ToFIFOToSoC(bus, wb, cd=cd, io_regions=io_regions)
+            master = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.timeout = WishboneErrorTimeout(wb, master, timeout)
+        else:
+            self.bridge = M68030ToWishbone(bus, io_regions=io_regions, timeout=timeout)
+            master = self.bridge.wishbone
         self.dev    = dev = BenchDevice()
         self.err    = ErrorSlave()
 
@@ -118,7 +138,7 @@ class Bench(LiteXModule):
         ]
         self.sync += ram_bus.ack.eq(ram_bus.cyc & ram_bus.stb & ~ram_bus.ack)
 
-        self.decoder = wishbone.Decoder(self.bridge.wishbone, [
+        self.decoder = wishbone.Decoder(master, [
             (lambda a: a[30-4:30] == 0x0, ram_bus),  # $0xxx_xxxx (the RAM repeats)
             (lambda a: a[30-4:30] == 0xe, self.err.bus),
             (lambda a: a[30-4:30] == 0xf, dev.bus),
@@ -139,8 +159,8 @@ class Bench(LiteXModule):
             p_DCACHE_ENTRIES          = dcache,
             p_COPROCESSOR             = 0,
             p_ADDR_HIZ_BETWEEN_CYCLES = 0,
-            i_clk        = ClockSignal("sys"),
-            i_rst_n      = ~ResetSignal("sys"),
+            i_clk        = ClockSignal(cd),
+            i_rst_n      = ~ResetSignal(cd),
             o_fc_o       = bus.fc,       o_fc_oe    = Open(),
             o_a_o        = bus.a,        o_a_oe     = Open(),
             i_d_i        = bus.d_r,
@@ -186,9 +206,11 @@ def main():
     parser.add_argument("--ram-size", default=0x40000, type=lambda x: int(x, 0), help="RAM size in bytes.")
     parser.add_argument("--icache",   default=64, type=int, help="ICACHE_ENTRIES (0: no instruction cache).")
     parser.add_argument("--dcache",   default=64, type=int, help="DCACHE_ENTRIES (0: no data cache).")
+    parser.add_argument("--bridge",   default="wishbone", choices=["wishbone", "fifo"],
+                        help="M68030ToWishbone, or M68030ToFIFOToSoC with the CPU on a clock of its own.")
     args = parser.parse_args()
 
-    bench = Bench(ram_size=args.ram_size, icache=args.icache, dcache=args.dcache)
+    bench = Bench(ram_size=args.ram_size, icache=args.icache, dcache=args.dcache, bridge=args.bridge)
     ios = {
         bench.cd_sys.clk, bench.cd_sys.rst,
         bench.tty_stb, bench.tty_data,
@@ -196,7 +218,9 @@ def main():
         bench.result_stb, bench.result,
     }
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    convert(bench, ios=ios, name="bench").write(args.output)
+    if args.bridge == "fifo":
+        ios |= {bench.cd_cpu.clk, bench.cd_cpu.rst}
+    convert(bench, ios=ios, name="bench", special_overrides=sim_special_overrides).write(args.output)
 
 if __name__ == "__main__":
     main()
