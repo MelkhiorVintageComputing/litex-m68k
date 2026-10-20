@@ -44,8 +44,9 @@ at a time, with `-j4` at most.
 | `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, the bridge |
 | `sim/bench/` | L1: core + bridge + Wishbone RAM, no LiteX SoC (`make -C sim/bench check`; `doc/l1-bench.md`) |
 | `litex_68k/cpu/rd68031/` | the LiteX CPU class and its software files (`litex_68k.cpu.register()`; `doc/l2-litex.md`) |
-| `targets/sim.py` | `litex_sim` with RD68031 |
-| `targets/qmtech_wukong.py` | L5: the Wukong V3 board, `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
+| `targets/sim.py` | `litex_sim` with RD68031 (`--uart-tx-clocks` paces its UART like a baud rate) |
+| `sim/unit/` | migen unit tests of `core.py`'s bus crossing and time-out, two clocks, in migen's simulator: no Verilator build (`make -C sim/unit check`) |
+| `targets/qmtech_wukong.py` | L5: the Wukong V3 board, DDR3 (CPU 25 MHz, SoC 100 MHz) or block RAM, `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
 | `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`) |
 | `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |

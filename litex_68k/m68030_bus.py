@@ -82,7 +82,10 @@ class M68030ToWishbone(LiteXModule):
     - CIIN is asserted with STERM for an address in io_regions (UM 7.3.4), so
       neither cache keeps a device register.
     - A Wishbone error, or no answer within `timeout` clocks, is a bus error:
-      BERR, held until AS is negated (UM 7.5.1, Table 7-9).
+      BERR, held until AS is negated (UM 7.5.1, Table 7-9). timeout=None: only
+      a Wishbone error, for a bus that has its own time-out and must not be
+      left mid-cycle (behind a clock domain crossing, which would still be
+      waiting for the answer when the next cycle comes).
     - CPU space (FC = 7, UM 7.4): an interrupt acknowledge (A19-A16 = $F) is
       autovectored, AVEC held until AS is negated (UM 7.4.1.2). Every other CPU
       space cycle gets BERR: a breakpoint acknowledge then takes the illegal
@@ -141,7 +144,7 @@ class M68030ToWishbone(LiteXModule):
         we    = Signal()
         dat_w = Signal(32)
         io    = Signal()
-        count = Signal(max=timeout + 1)
+        count = Signal(max=(timeout or 1) + 1)
         self.comb += [
             wb.adr.eq(adr),
             wb.sel.eq(sel),
@@ -188,7 +191,7 @@ class M68030ToWishbone(LiteXModule):
                 NextValue(ciin_n, ~io),
                 NextValue(sterm_n, 0),
                 NextState("END"),
-            ).Elif(wb.err | (count == timeout - 1),
+            ).Elif(wb.err | ((count == timeout - 1) if timeout else 0),
                 NextValue(berr_n, 0),
                 NextState("END"),
             ),

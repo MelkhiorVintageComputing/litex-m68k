@@ -55,11 +55,11 @@ def main():
     try:
         if args.serial:
             con = serial_console(args.serial, sys.stdout)
-            con.type("")
+            con.prompt()
         else:
             sim = start(sim_command(args.variant, build, args.port, pacing(args)), open(os.path.join(build, "sim.log"), "w"))
             con = socket_console(args.port, sys.stdout, sim)
-        con.expect(re.escape(PROMPT), 900)
+            con.expect(re.escape(PROMPT), 900)
 
         # The identifier, one character per 32-bit CSR word, in its low byte: at
         # +3 on a big-endian bus. (The BIOS's own ident command only reads it

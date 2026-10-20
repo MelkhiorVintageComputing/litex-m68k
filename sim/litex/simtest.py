@@ -129,6 +129,26 @@ class Console:
             self.send(c.encode())
             time.sleep(0.02)
 
+    def prompt(self, timeout=60, pattern=re.escape(PROMPT)):
+        """On a board's serial port: get a fresh prompt. Opening the port while
+        the board is printing can send a fragment of that output back to it
+        (doc/l5-wukong.md), typed into its console: wait for the line to go
+        quiet, then send newlines until a prompt (`pattern`) answers one."""
+        while True:
+            data = self.recv(1.0)
+            if not data:
+                break
+            self.log.write(ANSI.sub(b"", data).decode("latin-1").replace("\r", ""))
+        deadline = time.time() + timeout
+        while True:
+            self.buf = ""
+            self.type("")
+            try:
+                return self.expect("(" + pattern + r")\s*$", 3)
+            except Fail:
+                if time.time() > deadline:
+                    raise Fail("no prompt on the serial port")
+
     def command(self, cmd, timeout=120, until=PROMPT):
         self.type(cmd)
         out = self.expect(re.escape(until), timeout)

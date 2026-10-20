@@ -16,6 +16,23 @@ stand where other CPUs have internal registers:
 
 so irq_getmask/irq_setmask/irq_pending in irq.h are CSR accesses, and
 irq_getie/irq_setie move the status register's interrupt mask.
+
+Clocking: the core and its bridge run in `RD68031.clock_domain`, "sys" unless a
+target says otherwise. RD68031 makes about 30 MHz on an Artix-7, and LiteDRAM's
+Artix-7 PHY wants sys at 75 MHz or more: a board target with DDR3 sets
+clock_domain = "cpu" and provides that clock domain (50 % duty cycle: the core
+uses both edges). The bus then crosses to sys:
+
+- clock_synchronous = True (the default): the CPU's clock is sys's divided by an
+  integer, edges aligned (two outputs of one MMCM). WishboneSyncCrossing
+  answers within a CPU clock or two, which matters: the instruction cache is
+  256 bytes, so the BIOS runs mostly from the ROM, through the crossing.
+- clock_synchronous = False: any two clocks, through wishbone.ClockDomainCrossing
+  (asynchronous FIFOs, several clocks each way). The bridge's own time-out is
+  then off, since it would leave the crossing waiting for the answer to an
+  abandoned access and the next access behind it; WishboneErrorTimeout on the
+  sys side ends such an access instead. LiteX's own bus time-out does not do:
+  it answers with all ones and an ack, not an error.
 """
 
 import os
@@ -23,6 +40,8 @@ import os
 from migen import *
 
 from litex.gen import *
+
+from migen.genlib.cdc import MultiReg
 
 from litex import get_data_mod
 from litex.soc.interconnect import wishbone
@@ -42,6 +61,89 @@ CPU_VARIANTS = {
 # The one interrupt level every LiteX interrupt line raises (irq.h knows it too).
 IRQ_LEVEL = 2
 
+# Clocks (of the bus's domain) before an access nobody answers is a bus error.
+BUS_TIMEOUT = 1024
+
+# Wishbone crossing between synchronous clocks ----------------------------------------------------
+
+class WishboneSyncCrossing(LiteXModule):
+    """A Wishbone master in clock domain `cd`, whose clock is sys's divided by an
+    integer and aligned with it (two outputs of one MMCM), to a slave in sys.
+
+    Vivado times the paths between such clocks like any other, so the request
+    goes from the master to the slave as it is, with no synchroniser: the
+    access starts on the first sys edge after the master's, and its answer,
+    kept in sys registers, is there for the master's next edge.
+
+    Each access is made once. A toggle, kept in the master's domain, changes on
+    the first clock of each request: of a cycle, or right after an answer when
+    the master goes on with cyc and stb high. The sys side makes an access when
+    the toggle differs from the last one it answered, and answers until it
+    changes again. A master dropping cyc before its answer abandons the access
+    on the slave too, and leaves nothing pending."""
+    def __init__(self, master, slave, cd):
+        want   = Signal()   # The master's request (cd).
+        want_q = Signal()   # cd: want, one master clock ago.
+        ack_q  = Signal()   # cd: the master was answered on its last edge.
+        req_q  = Signal()   # cd: the toggle, as of the master's last edge.
+        req    = Signal()   # The toggle: req_q, changed on a request's first clock.
+        served = Signal()   # sys: the toggle the answer below is for.
+        err    = Signal()
+        dat_r  = Signal(len(master.dat_r))
+        answered = Signal()
+        self.comb += [
+            want.eq(master.cyc & master.stb),
+            req.eq(req_q ^ (want & (~want_q | ack_q))),
+            answered.eq(want & (req == served)),
+            master.connect(slave, omit={"cyc", "stb", "ack", "err", "dat_r"}),
+            slave.cyc.eq(want & ~answered),
+            slave.stb.eq(want & ~answered),
+            master.ack.eq(answered & ~err),
+            master.err.eq(answered &  err),
+            master.dat_r.eq(dat_r),
+        ]
+        getattr(self.sync, cd).__iadd__([
+            want_q.eq(want),
+            ack_q.eq(master.ack | master.err),
+            req_q.eq(req),
+        ])
+        self.sync += [
+            If(~want,
+                served.eq(req),     # Nothing asked: nothing pending either.
+            ).Elif(slave.cyc & slave.stb & (slave.ack | slave.err),
+                served.eq(req),
+                err.eq(slave.err),
+                dat_r.eq(slave.dat_r),
+            ),
+        ]
+
+# Wishbone time-out as an error -------------------------------------------------------------------
+
+class WishboneErrorTimeout(LiteXModule):
+    """master to slave, unchanged, except that an access still unanswered after
+    `cycles` clocks ends with err to the master, and cyc and stb dropped to the
+    slave (a Wishbone master may abandon a cycle)."""
+    def __init__(self, master, slave, cycles):
+        count     = Signal(max=cycles + 1)
+        timed_out = Signal()
+        active    = Signal()
+        self.comb += [
+            master.connect(slave, omit={"cyc", "stb"}),
+            active.eq(master.cyc & master.stb),
+            timed_out.eq(count == cycles - 1),
+            slave.cyc.eq(master.cyc & ~timed_out),
+            slave.stb.eq(master.stb & ~timed_out),
+            If(timed_out,
+                master.ack.eq(0),
+                master.err.eq(1),
+            ),
+        ]
+        self.sync += If(active & ~slave.ack & ~slave.err & ~timed_out,
+            count.eq(count + 1)
+        ).Else(
+            count.eq(0)
+        )
+
 # RD68031 ------------------------------------------------------------------------------------------
 
 class RD68031(CPU):
@@ -56,6 +158,8 @@ class RD68031(CPU):
     linker_output_format = "elf32-m68k"
     nop                  = "nop"
     io_regions           = {0x8000_0000: 0x8000_0000} # Origin, Length: uncached (CIIN).
+    clock_domain         = "sys"                      # See the module's docstring.
+    clock_synchronous    = True
 
     # Memory Mapping: the reset vectors are read at 0 (UM 8.1.1), so the ROM is there.
     @property
@@ -85,18 +189,40 @@ class RD68031(CPU):
 
         # # #
 
-        # The MC68030 bus, and the bridge to Wishbone.
+        # The MC68030 bus, and the bridge to Wishbone, in the CPU's clock domain.
+        cd   = self.clock_domain
         m68k = Record(m68030_bus_layout)
-        self.bridge = M68030ToWishbone(m68k, self.bus, io_regions=self.io_regions)
+        if cd == "sys":
+            self.bridge = M68030ToWishbone(m68k, self.bus, io_regions=self.io_regions)
+        elif self.clock_synchronous:
+            cpu_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.bridge = ClockDomainsRenamer(cd)(
+                M68030ToWishbone(m68k, cpu_bus, io_regions=self.io_regions))
+            self.cdc = WishboneSyncCrossing(cpu_bus, self.bus, cd)
+        else:
+            cpu_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.bridge = ClockDomainsRenamer(cd)(
+                M68030ToWishbone(m68k, cpu_bus, io_regions=self.io_regions, timeout=None))
+            sys_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.cdc     = wishbone.ClockDomainCrossing(cpu_bus, sys_bus, cd_from=cd, cd_to="sys")
+            self.timeout = WishboneErrorTimeout(sys_bus, self.bus, BUS_TIMEOUT)
 
         # Interrupts: every unmasked line raises IRQ_LEVEL.
         self.irq_pending = CSRStatus(32, description="Interrupt lines, as they are.")
         self.irq_mask    = CSRStorage(32, description="Interrupt lines that may interrupt the CPU.")
+        # IPL is asynchronous to the core, as on the chip (UM 5.8.1): it
+        # synchronises it itself, so it may come from sys, from a register so
+        # that it does not glitch.
         ipl = Signal(3)
-        self.comb += [
-            self.irq_pending.status.eq(self.interrupt),
-            ipl.eq(Mux((self.interrupt & self.irq_mask.storage) != 0, IRQ_LEVEL, 0)),
-        ]
+        self.comb += self.irq_pending.status.eq(self.interrupt)
+        self.sync += ipl.eq(Mux((self.interrupt & self.irq_mask.storage) != 0, IRQ_LEVEL, 0))
+
+        # The reset request (sys) as the CPU's clock domain sees it.
+        reset = Signal()
+        if cd == "sys":
+            self.comb += reset.eq(self.reset)
+        else:
+            self.specials += MultiReg(self.reset, reset, cd)
 
         reset_n_oe = Signal()
         self.cpu_params = dict(
@@ -107,8 +233,10 @@ class RD68031(CPU):
             p_ADDR_HIZ_BETWEEN_CYCLES = 0,
 
             # Clk / Rst.
-            i_clk        = ClockSignal("sys"),
-            i_rst_n      = ~(ResetSignal("sys") | self.reset),
+            # rst_n is an asynchronous reset in the core: what releases it
+            # comes from the core's own clock domain.
+            i_clk        = ClockSignal(cd),
+            i_rst_n      = ~(ResetSignal(cd) | reset),
 
             # Bus. The output enables are of no use inside the FPGA.
             o_fc_o       = m68k.fc,       o_fc_oe    = Open(),

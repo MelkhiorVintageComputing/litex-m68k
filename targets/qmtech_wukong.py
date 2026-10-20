@@ -4,37 +4,38 @@
 
 """RD68031 on the QMTech Wukong (xc7a100t), from litex-boards' target.
 
-L5 stage 1: the whole SoC on one 25 MHz clock (RD68031 makes about 29.6 MHz
-on an Artix-7, doc/plan.md), with integrated main RAM: no DDR3 yet.
-
     targets/qmtech_wukong.py --build             # Vivado: a heavy job, run it alone
     targets/qmtech_wukong.py --load              # into the FPGA over JTAG (not the flash)
     litex_term /dev/ttyUSB0
 
+Two configurations (doc/l5-wukong.md):
+
+- DDR3 main RAM (the default): the SoC at --sys-clk-freq (100 MHz), which
+  LiteDRAM's Artix-7 PHY needs, and the CPU at --cpu-clk-freq (25 MHz; RD68031
+  makes about 29.6 MHz on an Artix-7) in a clock domain of its own, from the
+  same MMCM, a whole fraction of sys, its bus crossing to sys synchronously
+  (core.py). Output: build/qmtech_wukong.
+- --integrated-main-ram-size N: block RAM instead, and one clock for all, the
+  CPU's. Output: build/qmtech_wukong_bram.
+
 Defaults that differ from litex-boards': --cpu-type rd68031, --revision 3,
---sys-clk-freq 25e6, --integrated-main-ram-size 0x10000, --timer-uptime, and --output-dir
-build/qmtech_wukong in this repository. --load uses Vivado's hardware manager
-(the board's JTAG here is a Xilinx Platform Cable, which litex-boards'
-OpenOCD configuration does not drive).
+--timer-uptime, the clocks above, and the output directory, in this repository.
+--load uses Vivado's hardware manager (the board's JTAG here is a Xilinx
+Platform Cable, which litex-boards' OpenOCD configuration does not drive).
 """
 
 import os
 import subprocess
 import sys
 
+from migen import ClockDomain, If, Signal
+from migen.genlib.cdc import MultiReg
+
 from litex_68k.cpu import register
+from litex_68k.cpu.rd68031.core import RD68031
 
 TOP = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 VIVADO_SETTINGS = os.environ.get("LITEX_ENV_VIVADO", "/opt/Xilinx/2025.2/Vivado")
-
-DEFAULTS = [
-    ("--cpu-type",                 "rd68031"),
-    ("--revision",                 "3"),
-    ("--sys-clk-freq",             "25e6"),
-    ("--integrated-main-ram-size", "0x10000"),
-    ("--output-dir",               os.path.join(TOP, "build", "qmtech_wukong")),
-]
-FLAGS = ["--timer-uptime"]                      # for the BIOS's uptime command
 
 def vivado_load(bitstream):
     """Load a bitstream into the FPGA (its configuration memory, not the flash)."""
@@ -53,27 +54,109 @@ def vivado_load(bitstream):
         VIVADO_SETTINGS, tcl)
     subprocess.check_call(["bash", "-c", cmd], cwd=os.path.dirname(tcl))
 
+def get_option(argv, opt, default=None, remove=False):
+    """The value of `opt value` or `opt=value` in argv, taken out if `remove`."""
+    for i, a in enumerate(argv):
+        if a == opt:
+            value = argv[i + 1]
+            if remove:
+                del argv[i:i + 2]
+            return value
+        if a.startswith(opt + "="):
+            if remove:
+                del argv[i]
+            return a.split("=", 1)[1]
+    return default
+
+def crg(qmtech_wukong, cpu_clk_freq=None):
+    """litex-boards' CRG, with a reset request that its MMCM sees, and, given
+    cpu_clk_freq, a "cpu" clock domain from one more output of its MMCM.
+
+    The reset: LiteX's MMCM takes its reset through flip-flops clocked by its
+    input clock, 50 MHz here (xilinx_common.py), and the SoC's reset request
+    (ctrl's soc_rst, the BIOS's reboot) is one sys clock long: 10 ns at 100
+    MHz, which a 20 ns clock samples or not, depending on the phase between
+    the two, which the build fixes. So the request is stretched, on the input
+    clock: a sys clock stops while its MMCM is in reset, and a stretcher
+    counting on it would never let the reset go. The request crosses as a
+    toggle, which no reset touches."""
+    RESET_CLOCKS = 16                           # of the input clock
+    class _CRG(qmtech_wukong._CRG):
+        def __init__(self, platform, speed_grade, sys_clk_freq, **kwargs):
+            super().__init__(platform, speed_grade, sys_clk_freq, **kwargs)
+            # The parent's MMCM reset is driven by self.rst: keep that signal,
+            # and give the SoC a new self.rst to drive.
+            mmcm_rst = self.rst
+            self.rst = Signal()
+            request  = Signal(reset_less=True)
+            self.sync += If(self.rst, request.eq(~request))
+
+            self.cd_crg_clkin = ClockDomain(reset_less=True)
+            self.comb += self.cd_crg_clkin.clk.eq(self.pll.clkin)
+            seen, seen_q = Signal(), Signal()
+            count = Signal(max=RESET_CLOCKS + 1)
+            self.specials += MultiReg(request, seen, "crg_clkin")
+            self.sync.crg_clkin += [
+                seen_q.eq(seen),
+                If(seen != seen_q,
+                    count.eq(RESET_CLOCKS)
+                ).Elif(count != 0,
+                    count.eq(count - 1)
+                ),
+            ]
+            self.comb += mmcm_rst.eq(count != 0)
+
+            if cpu_clk_freq is not None:
+                self.cd_cpu = ClockDomain()
+                self.pll.create_clkout(self.cd_cpu, cpu_clk_freq)
+    qmtech_wukong._CRG = _CRG
+
+def cpu_clock_domain(qmtech_wukong, cpu_clk_freq):
+    """RD68031 in a "cpu" clock domain, one more output of litex-boards' main MMCM."""
+    crg(qmtech_wukong, cpu_clk_freq)
+    RD68031.clock_domain = "cpu"
+    RD68031.clock_synchronous = True            # one MMCM, an integer ratio (main())
+
 def main():
     register()
     # The build runs tools from this Python's venv (meson, ninja), activated or not.
     os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
     os.environ.setdefault("LITEX_ENV_VIVADO", VIVADO_SETTINGS)
+
     argv = sys.argv[1:]
-    for opt, value in DEFAULTS:
-        if not any(a == opt or a.startswith(opt + "=") for a in argv):
-            argv = [opt, value] + argv
-    argv = [f for f in FLAGS if f not in argv] + argv
     # --load is ours: litex-boards' would run OpenOCD.
     load = "--load" in argv
     argv = [a for a in argv if a != "--load"]
+    cpu_clk_freq = float(get_option(argv, "--cpu-clk-freq", "25e6", remove=True))
+    ddr3 = get_option(argv, "--integrated-main-ram-size") is None
+
+    defaults = [
+        ("--cpu-type",     "rd68031"),
+        ("--revision",     "3"),
+        ("--sys-clk-freq", "100e6" if ddr3 else str(cpu_clk_freq)),
+        ("--output-dir",   os.path.join(TOP, "build", "qmtech_wukong" if ddr3 else "qmtech_wukong_bram")),
+    ]
+    for opt, value in defaults:
+        if get_option(argv, opt) is None:
+            argv = [opt, value] + argv
+    if "--timer-uptime" not in argv:            # for the BIOS's uptime command
+        argv = ["--timer-uptime"] + argv
     sys.argv[1:] = argv
 
     from litex_boards.targets import qmtech_wukong
+    sys_clk_freq = float(get_option(argv, "--sys-clk-freq"))
+    if sys_clk_freq != cpu_clk_freq:
+        # WishboneSyncCrossing (core.py) needs the CPU's clock to be sys's
+        # divided by an integer.
+        ratio = sys_clk_freq / cpu_clk_freq
+        assert ratio == int(ratio), "--sys-clk-freq must be a multiple of --cpu-clk-freq"
+        cpu_clock_domain(qmtech_wukong, cpu_clk_freq)
+    else:
+        crg(qmtech_wukong)
     qmtech_wukong.main()
 
     if load:
-        out = argv[argv.index("--output-dir") + 1]
-        vivado_load(os.path.join(out, "gateware", "qmtech_wukong.bit"))
+        vivado_load(os.path.join(get_option(argv, "--output-dir"), "gateware", "qmtech_wukong.bit"))
 
 if __name__ == "__main__":
     main()

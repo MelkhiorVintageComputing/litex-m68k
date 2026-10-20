@@ -54,10 +54,11 @@ def build_programs(soc, out):
         os.path.join(out, "cputest.log"), "cputest")
     return os.path.join(out, "demo.bin"), os.path.join(ct, "cputest.bin")
 
-def serial_boot(con, what):
+def serial_boot(con, what, at_prompt=False):
     """The BIOS loads boot.bin, whether its boot sequence asks litex_term for it
-    or, when that came before litex_term was there, the serialboot command."""
-    out = con.expect(r"Executing booted program|" + re.escape(PROMPT), 900)
+    or, when that came before litex_term was there (or `at_prompt`: the BIOS
+    is known to be at its prompt), the serialboot command."""
+    out = PROMPT if at_prompt else con.expect(r"Executing booted program|" + re.escape(PROMPT), 900)
     if out.endswith(PROMPT):
         con.type("serialboot")
         out = con.expect(r"Executing booted program", 600)
@@ -108,14 +109,16 @@ def main():
         os.close(slave)
         con = fd_console(master, sys.stdout,
             alive=lambda: (sim is None or sim.poll() is None) and term.poll() is None)
-        if args.serial:
-            con.type("")                # the BIOS is idle at its prompt: show it
 
-        # The demo.
-        serial_boot(con, "the demo")
-        out = con.expect(re.escape(DEMO_PROMPT), 120)
-        check("LiteX minimal demo app built" in out, "the demo: no banner")
+        # The demo. On a board, litex_term may have loaded it already: when the
+        # BIOS was still booting as the test began, its own boot sequence asked.
+        if args.serial and DEMO_PROMPT in con.prompt(pattern=re.escape(PROMPT) + "|" + re.escape(DEMO_PROMPT)):
+            pass
+        else:
+            serial_boot(con, "the demo", at_prompt=bool(args.serial))
+            con.expect(re.escape(DEMO_PROMPT), 120)
         out = con.command("help", until=DEMO_PROMPT)
+        check("LiteX minimal demo app built" in out, "the demo: no banner")
         check("helloc" in out and "reboot" in out, "the demo: help does not list its commands")
         out = con.command("helloc", until=DEMO_PROMPT)
         check("C: Hello, world!" in out, "the demo: helloc did not say hello")
