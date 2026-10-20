@@ -5,6 +5,7 @@
 #
 #   make check     build the SoC's headers, hello.c against them, then run it from
 #                  the ROM: passes on "L2 PASS"
+#   make bios      L3: the LiteX BIOS, driven over the UART (bios_test.py)
 #
 # The Verilator build of the SoC is a heavy job: run it alone (CLAUDE.md).
 
@@ -24,7 +25,7 @@ CFLAGS := -mcpu=68030 -O2 -ffreestanding -fno-builtin -fomit-frame-pointer \
           -I$(LITEX_SW)/include -I$(BUILD)/soc/software/include -I$(CPU_DIR)
 LDFLAGS := -nostdlib -nostartfiles -Wl,--build-id=none,--no-warn-rwx-segments -T rom.ld
 
-.PHONY: check headers clean
+.PHONY: check bios headers clean
 
 check: $(BUILD)/hello.bin
 	$(SIM) --rom-init $(BUILD)/hello.bin --non-interactive > $(BUILD)/run.log 2>&1 || true
@@ -42,6 +43,9 @@ $(BUILD)/hello.elf: crt0_rom.S hello.c rom.ld $(BUILD)/soc/software/include/gene
 
 $(BUILD)/hello.bin: $(BUILD)/hello.elf
 	$(CROSS)objcopy -O binary $< $@
+
+bios:
+	$(PYTHON) -u bios_test.py --variant $(VARIANT)
 
 clean:
 	rm -rf build

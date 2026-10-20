@@ -118,7 +118,7 @@ ROM at 0 (the reset vectors live at the start of the BIOS image). `targets/sim.p
 runs `litex_sim` with `--cpu-type rd68031 --integrated-main-ram-size …`; first test:
 a hand-written ROM program writing to the UART CSR.
 
-**L3 — LiteX BIOS in sim.** CPU directory files:
+**L3 — LiteX BIOS in sim.** *Done: `doc/l3-bios.md`; no LiteX patch needed.* CPU directory files:
 - `crt0.S`: 68k vector table at the top of `.text` (SSP=`_fstack`, PC=`_start`, all
   exceptions → a dumping handler, autovector level N → save regs, `jsr isr`, `rte`),
   copy `.data`, clear `.bss`, enable caches (CACR), `litex_startup_init`, `main`.

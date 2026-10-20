@@ -4,10 +4,6 @@
 #ifndef __SYSTEM_H
 #define __SYSTEM_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /* The cache control register, CACR (UM 6.3.1). MOVEC is privileged: everything
  * here runs in supervisor mode, as the BIOS does. */
 #define CACR_EI  0x0001 /* enable instruction cache */
@@ -21,6 +17,12 @@ extern "C" {
 #define CACR_CD  0x0800 /* clear data cache */
 #define CACR_DBE 0x1000 /* data burst enable */
 #define CACR_WA  0x2000 /* write allocate */
+
+#ifndef __ASSEMBLER__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 static inline unsigned long get_cacr(void)
 {
@@ -56,5 +58,7 @@ void busy_wait_us(unsigned int us);
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* ! __ASSEMBLER__ */
 
 #endif /* __SYSTEM_H */
