@@ -25,74 +25,10 @@ Prints each exchange, then "L3 PASS" or "L3 FAIL: <why>"; exit status 0 on pass.
 import argparse
 import os
 import re
-import signal
-import socket
-import subprocess
 import sys
-import time
 import zlib
 
-TOP = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-ANSI = re.compile(rb"\x1b\[[0-9;]*m")
-PROMPT = "litex>"
-
-class Fail(Exception):
-    pass
-
-class Console:
-    def __init__(self, port, log, sim):
-        self.log = log
-        deadline = time.time() + 600
-        while True:
-            try:
-                self.sock = socket.create_connection(("127.0.0.1", port), timeout=1)
-                break
-            except OSError:
-                if sim.poll() is not None:
-                    raise Fail("the simulation ended before its UART appeared (see sim.log)")
-                if time.time() > deadline:
-                    raise Fail("no UART on port {}".format(port))
-                time.sleep(0.5)
-        self.buf = ""
-        self.raw = b""
-
-    def expect(self, pattern, timeout):
-        """Read until pattern (a regex) appears; return everything up to it."""
-        deadline = time.time() + timeout
-        while True:
-            m = re.search(pattern, self.buf)
-            if m:
-                out, self.buf = self.buf[:m.end()], self.buf[m.end():]
-                return out
-            if time.time() > deadline:
-                raise Fail("timeout waiting for {!r}; last output: {!r}".format(pattern, self.buf[-300:]))
-            self.sock.settimeout(max(0.1, min(1.0, deadline - time.time())))
-            try:
-                data = self.sock.recv(4096)
-            except socket.timeout:
-                continue
-            if not data:
-                raise Fail("UART closed; last output: {!r}".format(self.buf[-300:]))
-            # serial2tcp sends a byte at a time: escape sequences are stripped
-            # from what has accumulated, not from each piece.
-            self.raw += data
-            text = ANSI.sub(b"", self.raw)
-            if b"\x1b" in text:            # an escape sequence not complete yet
-                continue
-            self.raw = b""
-            text = text.decode("latin-1").replace("\r", "")
-            self.log.write(text)
-            self.log.flush()
-            self.buf += text
-
-    def command(self, cmd, timeout=120, until=PROMPT):
-        # The BIOS echoes as it reads; type slowly enough for a 1 MHz CPU.
-        for c in cmd + "\n":
-            self.sock.sendall(c.encode())
-            time.sleep(0.02)
-        out = self.expect(re.escape(until), timeout)
-        # Drop the echoed command line.
-        return out.split("\n", 1)[1] if "\n" in out else out
+from simtest import Fail, PROMPT, check, sim_command, socket_console, start, stop
 
 def csr_ident(build):
     for line in open(os.path.join(build, "csr.csv")):
@@ -100,10 +36,6 @@ def csr_ident(build):
         if f[:2] == ["csr_base", "identifier_mem"]:
             return int(f[2], 0)
     raise Fail("no identifier_mem in csr.csv")
-
-def check(cond, what):
-    if not cond:
-        raise Fail(what)
 
 def main():
     parser = argparse.ArgumentParser(description="L3: the LiteX BIOS on RD68031, under litex_sim.")
@@ -114,22 +46,9 @@ def main():
 
     build = args.build_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", args.variant, "bios")
     os.makedirs(build, exist_ok=True)
-    sim_log = open(os.path.join(build, "sim.log"), "w")
-    # The build runs tools from the venv (meson, ninja) whether it is activated or not.
-    env = dict(os.environ, PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
-    sim = subprocess.Popen([sys.executable, os.path.join(TOP, "targets", "sim.py"),
-        "--cpu-variant", args.variant,
-        "--output-dir", build,
-        "--integrated-main-ram-size", "0x10000",
-        "--sim-debug",
-        "--timer-uptime",                       # for the uptime command
-        "--uart-tcp", "--uart-tcp-port", str(args.port),
-        "--non-interactive"],
-        stdout=sim_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
-        start_new_session=True) # The simulator is a grandchild: end the whole group.
-
+    sim = start(sim_command(args.variant, build, args.port), open(os.path.join(build, "sim.log"), "w"))
     try:
-        con = Console(args.port, sys.stdout, sim)
+        con = socket_console(args.port, sys.stdout, sim)
         con.expect(re.escape(PROMPT), 900)
 
         # The identifier, one character per 32-bit CSR word, in its low byte: at
@@ -180,13 +99,7 @@ def main():
         print("\nL3 FAIL: {}".format(e))
         return 1
     finally:
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(sim.pid, sig)
-                sim.wait(timeout=10)
-                break
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                pass
+        stop(sim)
 
 if __name__ == "__main__":
     sys.exit(main())

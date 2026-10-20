@@ -6,6 +6,8 @@
 #   make check     build the SoC's headers, hello.c against them, then run it from
 #                  the ROM: passes on "L2 PASS"
 #   make bios      L3: the LiteX BIOS, driven over the UART (bios_test.py)
+#   make l4        L4: the demo and cputest, loaded by the BIOS through litex_term
+#                  (l4_test.py)
 #
 # The Verilator build of the SoC is a heavy job: run it alone (CLAUDE.md).
 
@@ -25,7 +27,7 @@ CFLAGS := -mcpu=68030 -O2 -ffreestanding -fno-builtin -fomit-frame-pointer \
           -I$(LITEX_SW)/include -I$(BUILD)/soc/software/include -I$(CPU_DIR)
 LDFLAGS := -nostdlib -nostartfiles -Wl,--build-id=none,--no-warn-rwx-segments -T rom.ld
 
-.PHONY: check bios headers clean
+.PHONY: check bios l4 headers clean
 
 check: $(BUILD)/hello.bin
 	$(SIM) --rom-init $(BUILD)/hello.bin --non-interactive > $(BUILD)/run.log 2>&1 || true
@@ -46,6 +48,9 @@ $(BUILD)/hello.bin: $(BUILD)/hello.elf
 
 bios:
 	$(PYTHON) -u bios_test.py --variant $(VARIANT)
+
+l4:
+	$(PYTHON) -u l4_test.py --variant $(VARIANT)
 
 clean:
 	rm -rf build

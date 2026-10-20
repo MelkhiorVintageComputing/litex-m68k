@@ -130,7 +130,7 @@ Bring up picolibc and compiler_rt builds for m68k (big-endian); any LiteX build 
 needed becomes `patches/litex/`. Goal: BIOS banner, `help`, `mem_test`, `mem_speed`,
 CRC check, UART and timer0 interrupts working in `litex_sim`.
 
-**L4 — Bare-metal programs in sim.** LiteX's `litex_bare_metal_demo` built for m68k,
+**L4 — Bare-metal programs in sim.** *Done: `doc/l4-bare-metal.md`; no LiteX patch needed.* LiteX's `litex_bare_metal_demo` built for m68k,
 loaded by `serialboot` through `litex_term` over sim serial2tcp / `--ram-init`;
 plus a small 68030-specific test set (MMU on with identity tables, caches, exceptions
 → BIOS dump) reusing ideas from `Inputs/RD68031/sim/programs/`.
