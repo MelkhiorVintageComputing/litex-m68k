@@ -40,7 +40,9 @@ at a time, with `-j4` at most.
 | Path | What |
 |---|---|
 | `doc/plan.md` | the plan: milestones L0-L6 and why |
-| `Inputs/` | RD68031, RD68884, and the Motorola and board documentation (add-only) |
+| `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), and the Motorola and board documentation (add-only) |
+| `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, the bridge |
+| `sim/bench/` | L1: core + bridge + Wishbone RAM, no LiteX SoC (`make -C sim/bench check`; `doc/l1-bench.md`) |
 | `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
 | `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031` |

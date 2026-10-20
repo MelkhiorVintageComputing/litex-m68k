@@ -100,7 +100,8 @@ there. Write `CLAUDE.md` with the project rules (incl. RD68031's ban on reading
 Populate pythondata-cpu-rd68031. Check `make lint` of RD68031 still passes from the
 snapshot under Verilator 5.032.
 
-**L1 — Bridge, standalone.** `rd68031_top` + bridge + Wishbone RAM + a trivial WB
+**L1 — Bridge, standalone.** *Done: `doc/l1-bench.md`; the bridge started from
+IIsiFPGA's PDS bridge (`Inputs/IIsiFPGA`).* `rd68031_top` + bridge + Wishbone RAM + a trivial WB
 "tty" register in a Verilator testbench (no LiteX). Run RD68031's own bare-metal
 programs re-linked for this map (e.g. `sim/programs/arith.c` with an adapted `crt0.S`)
 and a dedicated bus test: every SIZ/A1:A0 combination, misaligned operands (dynamic
