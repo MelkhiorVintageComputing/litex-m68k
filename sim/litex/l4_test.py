@@ -28,11 +28,12 @@ import os
 import pty
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
 
-from simtest import Fail, PROMPT, TOP, check, fd_console, sim_command, start, stop, venv_env, wait_listening
+from simtest import pacing, Fail, PROMPT, TOP, check, fd_console, sim_command, start, stop, venv_env, wait_listening
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOAD = 0x40000000
@@ -43,17 +44,15 @@ def run(cmd, cwd, log, what):
         if subprocess.call(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=venv_env()):
             raise Fail("{} failed (see {})".format(what, log))
 
-def build_programs(variant, build):
-    """The SoC's software, then the demo and cputest against it."""
-    run(sim_command(variant, build, 0, ["--no-compile-gateware"]), build,
-        os.path.join(build, "software.log"), "the SoC's software")
-    run([sys.executable, "-m", "litex.soc.software.demo.demo", "--build-path", build], build,
-        os.path.join(build, "demo.log"), "the demo")
-    out = os.path.join(build, "cputest")
-    os.makedirs(out, exist_ok=True)
-    run(["make", "-f", os.path.join(HERE, "cputest", "Makefile"), "BUILD_DIR=" + build], out,
-        os.path.join(build, "cputest.log"), "cputest")
-    return os.path.join(build, "demo.bin"), os.path.join(out, "cputest.bin")
+def build_programs(soc, out):
+    """The demo and cputest, against the software of the SoC built in `soc`, into `out`."""
+    run([sys.executable, "-m", "litex.soc.software.demo.demo", "--build-path", soc], out,
+        os.path.join(out, "demo.log"), "the demo")
+    ct = os.path.join(out, "cputest")
+    os.makedirs(ct, exist_ok=True)
+    run(["make", "-f", os.path.join(HERE, "cputest", "Makefile"), "BUILD_DIR=" + soc], ct,
+        os.path.join(out, "cputest.log"), "cputest")
+    return os.path.join(out, "demo.bin"), os.path.join(ct, "cputest.bin")
 
 def serial_boot(con, what):
     """The BIOS loads boot.bin, whether its boot sequence asks litex_term for it
@@ -65,33 +64,52 @@ def serial_boot(con, what):
     check(re.search(r"Upload complete", out), "{}: litex_term did not upload it".format(what))
 
 def main():
+    # A SIGTERM (timeout(1), say) ends the test through its finally: litex_term,
+    # in a session of its own, would otherwise keep the serial port.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
     parser = argparse.ArgumentParser(description="L4: bare-metal programs on RD68031, under litex_sim.")
     parser.add_argument("--variant",   default="standard", help="CPU variant.")
     parser.add_argument("--port",      default=2431, type=int, help="TCP port for the UART.")
     parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/l4).")
+    parser.add_argument("--uart-tx-clocks", default=None,
+        help="Simulation: pace the UART's transmit side, a byte every N clocks (targets/sim.py).")
+    parser.add_argument("--serial",    default=None,
+        help="A board's serial port (e.g. /dev/ttyUSB0) instead of the simulation: the board runs "
+             "the SoC built in --build-dir, its BIOS at the prompt; the programs go to <build-dir>/l4.")
     args = parser.parse_args()
 
     build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant, "l4"))
-    os.makedirs(build, exist_ok=True)
+    out = os.path.join(build, "l4") if args.serial else build
+    os.makedirs(out, exist_ok=True)
     sim = term = None
     try:
-        demo, cputest = build_programs(args.variant, build)
-        boot = os.path.join(build, "boot.bin")
+        if not args.serial:
+            # The SoC's software, for the programs to build against.
+            run(sim_command(args.variant, build, 0, ["--no-compile-gateware"]), build,
+                os.path.join(build, "software.log"), "the SoC's software")
+        demo, cputest = build_programs(build, out)
+        boot = os.path.join(out, "boot.bin")
         shutil.copy(demo, boot)
 
-        sim = start(sim_command(args.variant, build, args.port), open(os.path.join(build, "sim.log"), "w"))
-        wait_listening(args.port, sim)
-
-        master, slave = pty.openpty()
-        term = subprocess.Popen([os.path.join(os.path.dirname(sys.executable), "litex_term"),
-            "socket://127.0.0.1:{}".format(args.port),
-            "--kernel", boot, "--kernel-adr", "0x{:08x}".format(LOAD),
+        if args.serial:
+            port, options = args.serial, []
+        else:
+            sim = start(sim_command(args.variant, build, args.port, pacing(args)), open(os.path.join(build, "sim.log"), "w"))
+            wait_listening(args.port, sim)
+            port = "socket://127.0.0.1:{}".format(args.port)
             # 64-byte frames: the simulated UART has no baud rate, a longer
             # frame overflows the BIOS's 128-byte receive ring (doc/l4-bare-metal.md).
-            "--safe"],
+            options = ["--safe"]
+
+        master, slave = pty.openpty()
+        term = subprocess.Popen([os.path.join(os.path.dirname(sys.executable), "litex_term"), port,
+            "--kernel", boot, "--kernel-adr", "0x{:08x}".format(LOAD), *options],
             stdin=slave, stdout=slave, stderr=slave, env=venv_env(), start_new_session=True)
         os.close(slave)
-        con = fd_console(master, sys.stdout, alive=lambda: sim.poll() is None and term.poll() is None)
+        con = fd_console(master, sys.stdout,
+            alive=lambda: (sim is None or sim.poll() is None) and term.poll() is None)
+        if args.serial:
+            con.type("")                # the BIOS is idle at its prompt: show it
 
         # The demo.
         serial_boot(con, "the demo")

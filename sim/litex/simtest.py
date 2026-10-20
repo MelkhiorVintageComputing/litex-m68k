@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright 2026 Romain Dolbeau
 
-"""What the litex_sim tests share: running targets/sim.py with its UART on a
-TCP port, and a console that types commands and waits for answers, over that
-port (bios_test.py) or through litex_term (l4_test.py)."""
+"""What the tests share: running targets/sim.py with its UART on a TCP port,
+and a console that types commands and waits for answers, over that port or a
+board's serial port (bios_test.py), or through litex_term (l4_test.py)."""
 
 import os
 import re
@@ -37,6 +37,10 @@ def sim_command(variant, build, port, extra=()):
         "--timer-uptime",                       # for the uptime command
         "--uart-tcp", "--uart-tcp-port", str(port),
         "--non-interactive", *extra]
+
+def pacing(args):
+    """The targets/sim.py options for a test's --uart-tx-clocks."""
+    return ["--uart-tx-clocks", str(args.uart_tx_clocks)] if args.uart_tx_clocks else []
 
 def venv_env():
     # The build runs tools from the venv (meson, ninja) whether it is activated or not.
@@ -142,6 +146,16 @@ def socket_console(port, log, sim):
         except socket.timeout:
             return None
     return Console(recv, sock.sendall, log, alive=lambda: sim.poll() is None)
+
+def serial_console(device, log, baudrate=115200):
+    """A console on a board's serial port."""
+    import serial
+    port = serial.serial_for_url(device, baudrate)
+    def recv(timeout):
+        port.timeout = timeout
+        data = port.read(max(1, port.in_waiting))
+        return data if data else None
+    return Console(recv, port.write, log)
 
 def fd_console(fd, log, alive):
     """A console on a file descriptor: the master side of litex_term's terminal."""

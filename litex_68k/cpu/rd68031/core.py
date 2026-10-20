@@ -165,9 +165,12 @@ class RD68031(CPU):
 
     @staticmethod
     def add_sources(platform):
+        from litex.build.sim import SimPlatform
         rd68031 = get_data_mod("cpu", "rd68031")
-        # The Verilator waivers first, then the RTL in compile order (packages first).
-        platform.add_source(os.path.join(rd68031.data_location, rd68031.verilator_config))
+        # The Verilator waivers first (for Verilator only), then the RTL in
+        # compile order (packages first).
+        if isinstance(platform, SimPlatform):
+            platform.add_source(os.path.join(rd68031.data_location, rd68031.verilator_config))
         for f in rd68031.sources:
             platform.add_source(os.path.join(rd68031.data_location, f), "systemverilog")
 

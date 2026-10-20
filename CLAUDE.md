@@ -45,6 +45,7 @@ at a time, with `-j4` at most.
 | `sim/bench/` | L1: core + bridge + Wishbone RAM, no LiteX SoC (`make -C sim/bench check`; `doc/l1-bench.md`) |
 | `litex_68k/cpu/rd68031/` | the LiteX CPU class and its software files (`litex_68k.cpu.register()`; `doc/l2-litex.md`) |
 | `targets/sim.py` | `litex_sim` with RD68031 |
+| `targets/qmtech_wukong.py` | L5: the Wukong V3 board, `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
 | `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`) |
 | `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
@@ -57,6 +58,9 @@ at a time, with `-j4` at most.
   `litex_term`, ...) are wrappers in that venv's `bin/`.
 - Toolchain: `m68k-linux-gnu-gcc` 14.2 (Debian); no m68k-elf. Verilator 5.032,
   iverilog 12.0, `libevent-dev` and `libjson-c-dev` (for `litex_sim`), Vivado 2025.2 in `/opt/Xilinx/2025.2/`.
+- Board: Wukong V3, JTAG on a Xilinx Platform Cable USB II (Vivado's `hw_server`; no
+  openocd), UART on `/dev/ttyUSB0`. A loaded bitstream lasts until power-off or the PROG
+  key; nothing here writes the board's flash.
 - Documentation: `Inputs/doc/MC68030_Doc_More_Readable/MC68030UM_split/`,
   `.../MC68881UM_split/`, `Inputs/doc/QM_XC7A100T_WUKONG_BOARD/`. Read PDFs with
   `pdftotext -layout <file> -`.

@@ -95,7 +95,16 @@ _exception:
         move.l  %d0, -(%sp)
         pea     _exception_msg
         jsr     printf
-        bra     .
+        | With interrupts masked, libbase's uart_write leaves what the UART's
+        | FIFO cannot take in its ring until the ring fills: send it all
+        | before stopping. uart_sync exists when the SoC has a UART.
+        lea     uart_sync, %a0
+        cmpa.w  #0, %a0
+        beq     1f
+        jsr     (%a0)
+1:      bra     .
+
+        .weak   uart_sync
 
         .section .rodata
 _exception_msg:

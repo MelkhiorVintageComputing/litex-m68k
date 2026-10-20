@@ -28,7 +28,7 @@ import re
 import sys
 import zlib
 
-from simtest import Fail, PROMPT, check, sim_command, socket_console, start, stop
+from simtest import pacing, Fail, PROMPT, check, serial_console, sim_command, socket_console, start, stop
 
 def csr_ident(build):
     for line in open(os.path.join(build, "csr.csv")):
@@ -42,13 +42,23 @@ def main():
     parser.add_argument("--variant",   default="standard", help="CPU variant.")
     parser.add_argument("--port",      default=2430, type=int, help="TCP port for the UART.")
     parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/bios).")
+    parser.add_argument("--uart-tx-clocks", default=None,
+        help="Simulation: pace the UART's transmit side, a byte every N clocks (targets/sim.py).")
+    parser.add_argument("--serial",    default=None,
+        help="A board's serial port (e.g. /dev/ttyUSB0) instead of the simulation: the board runs "
+             "the SoC built in --build-dir, its BIOS at the prompt.")
     args = parser.parse_args()
 
     build = args.build_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", args.variant, "bios")
     os.makedirs(build, exist_ok=True)
-    sim = start(sim_command(args.variant, build, args.port), open(os.path.join(build, "sim.log"), "w"))
+    sim = None
     try:
-        con = socket_console(args.port, sys.stdout, sim)
+        if args.serial:
+            con = serial_console(args.serial, sys.stdout)
+            con.type("")
+        else:
+            sim = start(sim_command(args.variant, build, args.port, pacing(args)), open(os.path.join(build, "sim.log"), "w"))
+            con = socket_console(args.port, sys.stdout, sim)
         con.expect(re.escape(PROMPT), 900)
 
         # The identifier, one character per 32-bit CSR word, in its low byte: at
@@ -80,9 +90,12 @@ def main():
             m = re.search(r"Uptime:\s*(\d+)\s*sys_clk", out)
             check(m, "uptime: no sys_clk count")
             return int(m.group(1))
-        t0 = uptime()
-        t1 = uptime()
-        check(t1 > t0, "uptime does not move: {} then {}".format(t0, t1))
+        if "timer0_uptime" in open(os.path.join(build, "csr.csv")).read():
+            t0 = uptime()
+            t1 = uptime()
+            check(t1 > t0, "uptime does not move: {} then {}".format(t0, t1))
+        else:
+            print("\n(no --timer-uptime in this SoC: uptime not checked)")
 
         con.command("mem_write 0x40001004 0xcafef00d")
         con.command("flush_cpu_dcache")
@@ -99,7 +112,8 @@ def main():
         print("\nL3 FAIL: {}".format(e))
         return 1
     finally:
-        stop(sim)
+        if sim is not None:
+            stop(sim)
 
 if __name__ == "__main__":
     sys.exit(main())

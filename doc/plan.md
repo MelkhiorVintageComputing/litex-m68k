@@ -135,7 +135,7 @@ loaded by `serialboot` through `litex_term` over sim serial2tcp / `--ram-init`;
 plus a small 68030-specific test set (MMU on with identity tables, caches, exceptions
 → BIOS dump) reusing ideas from `Inputs/RD68031/sim/programs/`.
 
-**L5 — Wukong FPGA.** `targets/qmtech_wukong.py` wraps the board target with our CPU.
+**L5 — Wukong FPGA.** *Stage 1 done: `doc/l5-wukong.md`.* `targets/qmtech_wukong.py` wraps the board target with our CPU.
 Clocking: CPU in its own `cpu` clock domain (~25 MHz, 50 % duty from the MMCM), the
 rest of the SoC at sys (≥ 75–100 MHz, needed by A7DDRPHY), Wishbone/LiteDRAM CDC
 between them (LiteDRAM ports accept `clock_domain=`; evaluate LiteX's WB CDC options).
