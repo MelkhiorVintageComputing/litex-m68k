@@ -1,0 +1,1676 @@
+From 0834b34cf0d23699543b5ecb179b06c8303a12bd Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Wed, 21 Oct 2026 14:46:47 +0200
+Subject: [PATCH 3/3] m68k: extended precision soft-float routines from soft-fp
+
+libgcc's m68k XFmode routines (fpgnulib.c built with EXTFLOAT) work in
+double precision: every operand is converted to DFmode and back, and even
+the comparisons compare doubles.  A soft-float program whose long double
+is the 80-bit extended format gets 53-bit results where it expects 64,
+and wrong decimal conversions in a C library that relies on long double
+being exact.  musl's printf, for one, prints 2/3 as 0.666666, 1e100 as
+9.99999e+99 and 0.1 as 0.099999999999994316 on such a system (its m68k
+soft-float ABI, ld-musl-m68k-sf.so.1).
+
+Use soft-fp instead, in the m68k extended format:
+
+- extended-m68k.h is that format for soft-fp.  It differs from
+  soft-fp/extended.h's x87 one at the bottom of the range: an exponent
+  of 0 with the explicit integer bit set is a normal number, 2**-16383,
+  and a denormal is 0.F * 2**-16383.  So soft-fp works in a format "M"
+  with a 16-bit exponent biased by 16384, in which every m68k value is
+  exact with soft-fp's own denormal rule, and packing maps back to the 15
+  bits, an exponent beyond them overflowing to infinity.  Unnormal
+  operands are normalized on the way in, as the MC68881 does.
+- The words are 64 bits wide: with 32-bit words the working fraction (67
+  bits) does not reach the top of its four words, and soft-fp's addition
+  clears the bits a borrow leaves above the fraction only in the word
+  holding the implicit bit.
+- The functions are soft-fp's TFmode ones in that format: add, sub, mul,
+  div, neg, the comparisons, unord, the conversions from and to SFmode,
+  DFmode and SImode.  __cmpxf2, which fpgnulib.c also provided, is an
+  alias of __lexf2.  NaNs follow the MC68881: its default NaN (positive,
+  all fraction bits set) and, between two NaN operands, the first.
+- fpgnulib.c keeps its SFmode and DFmode part only.
+
+Tested on the host against x87 long double (98 million results where
+the formats agree), and against an exact rational reference where they
+do not (m68k's lowest binade, denormals, unnormals); on a 68030 without
+FPU, musl's printf now prints what glibc does.
+
+libgcc/ChangeLog:
+
+	* config/m68k/sfp-machine.h: New file.
+	* config/m68k/extended-m68k.h: New file.
+	* config/m68k/addxf3.c, config/m68k/subxf3.c,
+	config/m68k/mulxf3.c, config/m68k/divxf3.c,
+	config/m68k/negxf2.c, config/m68k/eqxf2.c,
+	config/m68k/gexf2.c, config/m68k/lexf2.c,
+	config/m68k/unordxf2.c, config/m68k/extendsfxf2.c,
+	config/m68k/extenddfxf2.c, config/m68k/truncxfsf2.c,
+	config/m68k/truncxfdf2.c, config/m68k/fixxfsi.c,
+	config/m68k/floatsixf.c, config/m68k/floatunsixf.c: New files.
+	* config/m68k/t-floatlib (LIB2ADD): Add them instead of
+	xfgnulib.c.
+	(xfgnulib.c): Remove.
+	* config/m68k/fpgnulib.c: Remove the EXTFLOAT part.
+---
+ libgcc/config/m68k/addxf3.c        |  52 +++++
+ libgcc/config/m68k/divxf3.c        |  52 +++++
+ libgcc/config/m68k/eqxf2.c         |  52 +++++
+ libgcc/config/m68k/extenddfxf2.c   |  52 +++++
+ libgcc/config/m68k/extended-m68k.h | 214 +++++++++++++++++++
+ libgcc/config/m68k/extendsfxf2.c   |  52 +++++
+ libgcc/config/m68k/fixxfsi.c       |  48 +++++
+ libgcc/config/m68k/floatsixf.c     |  46 +++++
+ libgcc/config/m68k/floatunsixf.c   |  46 +++++
+ libgcc/config/m68k/fpgnulib.c      | 320 +----------------------------
+ libgcc/config/m68k/gexf2.c         |  52 +++++
+ libgcc/config/m68k/lexf2.c         |  54 +++++
+ libgcc/config/m68k/mulxf3.c        |  52 +++++
+ libgcc/config/m68k/negxf2.c        |  47 +++++
+ libgcc/config/m68k/sfp-machine.h   |  78 +++++++
+ libgcc/config/m68k/subxf3.c        |  52 +++++
+ libgcc/config/m68k/t-floatlib      |  11 +-
+ libgcc/config/m68k/truncxfdf2.c    |  51 +++++
+ libgcc/config/m68k/truncxfsf2.c    |  51 +++++
+ libgcc/config/m68k/unordxf2.c      |  50 +++++
+ 20 files changed, 1109 insertions(+), 323 deletions(-)
+ create mode 100644 libgcc/config/m68k/addxf3.c
+ create mode 100644 libgcc/config/m68k/divxf3.c
+ create mode 100644 libgcc/config/m68k/eqxf2.c
+ create mode 100644 libgcc/config/m68k/extenddfxf2.c
+ create mode 100644 libgcc/config/m68k/extended-m68k.h
+ create mode 100644 libgcc/config/m68k/extendsfxf2.c
+ create mode 100644 libgcc/config/m68k/fixxfsi.c
+ create mode 100644 libgcc/config/m68k/floatsixf.c
+ create mode 100644 libgcc/config/m68k/floatunsixf.c
+ create mode 100644 libgcc/config/m68k/gexf2.c
+ create mode 100644 libgcc/config/m68k/lexf2.c
+ create mode 100644 libgcc/config/m68k/mulxf3.c
+ create mode 100644 libgcc/config/m68k/negxf2.c
+ create mode 100644 libgcc/config/m68k/sfp-machine.h
+ create mode 100644 libgcc/config/m68k/subxf3.c
+ create mode 100644 libgcc/config/m68k/truncxfdf2.c
+ create mode 100644 libgcc/config/m68k/truncxfsf2.c
+ create mode 100644 libgcc/config/m68k/unordxf2.c
+
+diff --git a/libgcc/config/m68k/addxf3.c b/libgcc/config/m68k/addxf3.c
+new file mode 100644
+index 0000000..b736d1f
+--- /dev/null
++++ b/libgcc/config/m68k/addxf3.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/addtf3.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++XFtype
++__addxf3 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  FP_DECL_M (R);
++  XFtype r;
++
++  FP_INIT_ROUNDMODE;
++  FP_UNPACK_SEMIRAW_M (A, a);
++  FP_UNPACK_SEMIRAW_M (B, b);
++  FP_ADD_M (R, A, B);
++  FP_PACK_SEMIRAW_M (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/divxf3.c b/libgcc/config/m68k/divxf3.c
+new file mode 100644
+index 0000000..65ab712
+--- /dev/null
++++ b/libgcc/config/m68k/divxf3.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/divtf3.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++XFtype
++__divxf3 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  FP_DECL_M (R);
++  XFtype r;
++
++  FP_INIT_ROUNDMODE;
++  FP_UNPACK_M (A, a);
++  FP_UNPACK_M (B, b);
++  FP_DIV_M (R, A, B);
++  FP_PACK_M (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/eqxf2.c b/libgcc/config/m68k/eqxf2.c
+new file mode 100644
+index 0000000..746c620
+--- /dev/null
++++ b/libgcc/config/m68k/eqxf2.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/eqtf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++CMPtype
++__eqxf2 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  CMPtype r;
++
++  FP_INIT_EXCEPTIONS;
++  FP_UNPACK_RAW_M (A, a);
++  FP_UNPACK_RAW_M (B, b);
++  FP_CMP_EQ_M (r, A, B, 1);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++
++strong_alias (__eqxf2, __nexf2);
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/extenddfxf2.c b/libgcc/config/m68k/extenddfxf2.c
+new file mode 100644
+index 0000000..6715c8d
+--- /dev/null
++++ b/libgcc/config/m68k/extenddfxf2.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/extenddftf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#define FP_NO_EXACT_UNDERFLOW
++#include "soft-fp/soft-fp.h"
++#include "soft-fp/double.h"
++#include "extended-m68k.h"
++
++XFtype
++__extenddfxf2 (DFtype a)
++{
++  FP_DECL_EX;
++  FP_DECL_D (A);
++  FP_DECL_M (R);
++  XFtype r;
++
++  FP_INIT_EXCEPTIONS;
++  FP_UNPACK_RAW_D (A, a);
++  FP_EXTEND (M, D, 2, 1, R, A);
++  FP_PACK_RAW_M (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/extended-m68k.h b/libgcc/config/m68k/extended-m68k.h
+new file mode 100644
+index 0000000..9dad2ab
+--- /dev/null
++++ b/libgcc/config/m68k/extended-m68k.h
+@@ -0,0 +1,214 @@
++/* Software floating-point emulation: the m68k extended precision format.
++   Copyright (C) 2026 Free Software Foundation, Inc.
++
++This file is part of GCC.
++
++GCC is free software; you can redistribute it and/or modify it under
++the terms of the GNU General Public License as published by the Free
++Software Foundation; either version 3, or (at your option) any later
++version.
++
++GCC is distributed in the hope that it will be useful, but WITHOUT ANY
++WARRANTY; without even the implied warranty of MERCHANTABILITY or
++FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++for more details.
++
++Under Section 7 of GPL version 3, you are granted additional
++permissions described in the GCC Runtime Library Exception, version
++3.1, as published by the Free Software Foundation.
++
++You should have received a copy of the GNU General Public License and
++a copy of the GCC Runtime Library Exception along with this program;
++see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
++<http://www.gnu.org/licenses/>.  */
++
++/* The MC68881's extended precision (XFmode, 12 bytes): a sign, a 15-bit
++   exponent biased by 16383, 16 bits of padding, and a 64-bit mantissa
++   whose integer bit is explicit.  Its value is J.F * 2**(E - 16383) for
++   every E below 32767, E = 0 included: unlike the x87 format of
++   soft-fp/extended.h, an exponent of 0 with J set is a normal number,
++   and a denormal is 0.F * 2**-16383.  That is one binade more than a
++   15-bit exponent leaves an IEEE-style format.
++
++   So the format soft-fp works in here, M, has a 16-bit exponent biased by
++   16384: M's exponent is E + 1 for a number with J set, 0 for a denormal
++   (J clear, E = 0), and 65535 for an infinity or a NaN (E = 32767).
++   Every m68k value is then exact in M, with soft-fp's own denormal rule,
++   and soft-fp rounds as it does for any format.  Packing maps back; an
++   exponent beyond m68k's range is an overflow, to infinity (these
++   routines round to nearest).  An unnormal (J clear, E nonzero) is
++   normalized on the way in, as the MC68881 does with its operands.  */
++
++#ifndef M68K_EXTENDED_M68K_H
++#define M68K_EXTENDED_M68K_H	1
++
++#if _FP_W_TYPE_SIZE != 64
++# error "extended-m68k.h expects 64-bit words (sfp-machine.h)"
++#endif
++
++#define _FP_FRACTBITS_M		(2*_FP_W_TYPE_SIZE)
++#define _FP_FRACTBITS_DW_M	(4*_FP_W_TYPE_SIZE)
++
++#define _FP_FRACBITS_M		64
++#define _FP_FRACXBITS_M		(_FP_FRACTBITS_M - _FP_FRACBITS_M)
++#define _FP_WFRACBITS_M		(_FP_WORKBITS + _FP_FRACBITS_M)
++#define _FP_WFRACXBITS_M	(_FP_FRACTBITS_M - _FP_WFRACBITS_M)
++#define _FP_EXPBITS_M		16
++#define _FP_EXPBIAS_M		16384
++#define _FP_EXPMAX_M		65535
++
++#define _FP_QNANBIT_M		\
++	((_FP_W_TYPE) 1 << (_FP_FRACBITS_M-2) % _FP_W_TYPE_SIZE)
++#define _FP_QNANBIT_SH_M		\
++	((_FP_W_TYPE) 1 << (_FP_FRACBITS_M-2+_FP_WORKBITS) % _FP_W_TYPE_SIZE)
++#define _FP_IMPLBIT_M		\
++	((_FP_W_TYPE) 1 << (_FP_FRACBITS_M-1) % _FP_W_TYPE_SIZE)
++#define _FP_IMPLBIT_SH_M		\
++	((_FP_W_TYPE) 1 << (_FP_FRACBITS_M-1+_FP_WORKBITS) % _FP_W_TYPE_SIZE)
++#define _FP_OVERFLOW_M		\
++	((_FP_W_TYPE) 1 << (_FP_WFRACBITS_M % _FP_W_TYPE_SIZE))
++
++#define _FP_WFRACBITS_DW_M	(2 * _FP_WFRACBITS_M)
++#define _FP_WFRACXBITS_DW_M	(_FP_FRACTBITS_DW_M - _FP_WFRACBITS_DW_M)
++#define _FP_HIGHBIT_DW_M	\
++  ((_FP_W_TYPE) 1 << (_FP_WFRACBITS_DW_M - 1) % _FP_W_TYPE_SIZE)
++
++#ifndef M68K_XFTYPE
++typedef float XFtype __attribute__ ((mode (XF)));
++# define M68K_XFTYPE XFtype
++#endif
++
++/* The 12 bytes as three 32-bit words: the sign and exponent in the high
++   half of the first, the mantissa in the other two.  */
++union _FP_UNION_M
++{
++  M68K_XFTYPE flt;
++  struct
++  {
++    unsigned int se;
++    unsigned int hi;
++    unsigned int lo;
++  } w;
++};
++
++#define FP_DECL_M(X)		_FP_DECL (2, X)
++
++/* To M's raw form: the mantissa in X_f0, its integer bit dropped as
++   soft-fp keeps it implicit, and the exponent as above.  */
++#define FP_UNPACK_RAW_M(X, val)						\
++  do									\
++    {									\
++      union _FP_UNION_M FP_UNPACK_RAW_M_flo;				\
++      FP_UNPACK_RAW_M_flo.flt = (val);					\
++									\
++      X##_f1 = 0;							\
++      X##_f0 = ((_FP_W_TYPE) FP_UNPACK_RAW_M_flo.w.hi << 32)		\
++	       | FP_UNPACK_RAW_M_flo.w.lo;				\
++      X##_s = FP_UNPACK_RAW_M_flo.w.se >> 31;				\
++      X##_e = (FP_UNPACK_RAW_M_flo.w.se >> 16) & 0x7fff;		\
++      if (X##_e == 0x7fff)						\
++	X##_e = _FP_EXPMAX_M;						\
++      else if (X##_f0 == 0)						\
++	X##_e = 0;							\
++      else								\
++	{								\
++	  /* An unnormal: shift up while the exponent allows.  */	\
++	  while (X##_e != 0 && !(X##_f0 & _FP_IMPLBIT_M))		\
++	    {								\
++	      X##_f0 <<= 1;						\
++	      X##_e--;							\
++	    }								\
++	  if (X##_f0 & _FP_IMPLBIT_M)					\
++	    X##_e++;							\
++	}								\
++      X##_f0 &= ~_FP_IMPLBIT_M;						\
++    }									\
++  while (0)
++
++/* From M's raw form.  An infinity has J clear, a NaN J set, as GCC's
++   constants and the MC68881 have them.  */
++#define FP_PACK_RAW_M(val, X)						\
++  do									\
++    {									\
++      union _FP_UNION_M FP_PACK_RAW_M_flo;				\
++      unsigned int FP_PACK_RAW_M_e;					\
++									\
++      if (X##_e >= 0x8000 && X##_e != _FP_EXPMAX_M)			\
++	{								\
++	  /* Beyond the largest m68k exponent: infinity.  */		\
++	  X##_e = _FP_EXPMAX_M;						\
++	  X##_f0 = 0;							\
++	}								\
++      if (X##_e == _FP_EXPMAX_M)					\
++	{								\
++	  FP_PACK_RAW_M_e = 0x7fff;					\
++	  if (X##_f0)							\
++	    X##_f0 |= _FP_IMPLBIT_M;					\
++	}								\
++      else if (X##_e == 0)						\
++	FP_PACK_RAW_M_e = 0;						\
++      else								\
++	{								\
++	  FP_PACK_RAW_M_e = X##_e - 1;					\
++	  X##_f0 |= _FP_IMPLBIT_M;					\
++	}								\
++      FP_PACK_RAW_M_flo.w.se = ((unsigned int) X##_s << 31)		\
++			       | (FP_PACK_RAW_M_e << 16);		\
++      FP_PACK_RAW_M_flo.w.hi = X##_f0 >> 32;				\
++      FP_PACK_RAW_M_flo.w.lo = X##_f0;					\
++      (val) = FP_PACK_RAW_M_flo.flt;					\
++    }									\
++  while (0)
++
++#define FP_UNPACK_M(X, val)			\
++  do						\
++    {						\
++      FP_UNPACK_RAW_M (X, (val));		\
++      _FP_UNPACK_CANONICAL (M, 2, X);		\
++    }						\
++  while (0)
++
++#define FP_UNPACK_SEMIRAW_M(X, val)		\
++  do						\
++    {						\
++      FP_UNPACK_RAW_M (X, (val));		\
++      _FP_UNPACK_SEMIRAW (M, 2, X);		\
++    }						\
++  while (0)
++
++#define FP_PACK_M(val, X)			\
++  do						\
++    {						\
++      _FP_PACK_CANONICAL (M, 2, X);		\
++      FP_PACK_RAW_M ((val), X);			\
++    }						\
++  while (0)
++
++#define FP_PACK_SEMIRAW_M(val, X)		\
++  do						\
++    {						\
++      _FP_PACK_SEMIRAW (M, 2, X);		\
++      FP_PACK_RAW_M ((val), X);			\
++    }						\
++  while (0)
++
++#define FP_ISSIGNAN_M(X)	_FP_ISSIGNAN (M, 2, X)
++#define FP_NEG_M(R, X)		_FP_NEG (M, 2, R, X)
++#define FP_ADD_M(R, X, Y)	_FP_ADD (M, 2, R, X, Y)
++#define FP_SUB_M(R, X, Y)	_FP_SUB (M, 2, R, X, Y)
++#define FP_MUL_M(R, X, Y)	_FP_MUL (M, 2, R, X, Y)
++#define FP_DIV_M(R, X, Y)	_FP_DIV (M, 2, R, X, Y)
++
++#define FP_CMP_M(r, X, Y, un, ex)	_FP_CMP (M, 2, (r), X, Y, (un), (ex))
++#define FP_CMP_EQ_M(r, X, Y, ex)	_FP_CMP_EQ (M, 2, (r), X, Y, (ex))
++#define FP_CMP_UNORD_M(r, X, Y, ex)	_FP_CMP_UNORD (M, 2, (r), X, Y, (ex))
++
++#define FP_TO_INT_M(r, X, rsz, rsg)	_FP_TO_INT (M, 2, (r), X, (rsz), (rsg))
++#define FP_FROM_INT_M(X, r, rs, rt)	_FP_FROM_INT (M, 2, X, (r), (rs), rt)
++
++#define _FP_FRAC_HIGH_M(X)	(X##_f1)
++#define _FP_FRAC_HIGH_RAW_M(X)	(X##_f0)
++
++#define _FP_FRAC_HIGH_DW_M(X)	(X##_f[2])
++
++#endif /* M68K_EXTENDED_M68K_H */
+diff --git a/libgcc/config/m68k/extendsfxf2.c b/libgcc/config/m68k/extendsfxf2.c
+new file mode 100644
+index 0000000..8bff753
+--- /dev/null
++++ b/libgcc/config/m68k/extendsfxf2.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/extendsftf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#define FP_NO_EXACT_UNDERFLOW
++#include "soft-fp/soft-fp.h"
++#include "soft-fp/single.h"
++#include "extended-m68k.h"
++
++XFtype
++__extendsfxf2 (SFtype a)
++{
++  FP_DECL_EX;
++  FP_DECL_S (A);
++  FP_DECL_M (R);
++  XFtype r;
++
++  FP_INIT_EXCEPTIONS;
++  FP_UNPACK_RAW_S (A, a);
++  FP_EXTEND (M, S, 2, 1, R, A);
++  FP_PACK_RAW_M (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/fixxfsi.c b/libgcc/config/m68k/fixxfsi.c
+new file mode 100644
+index 0000000..3d304cf
+--- /dev/null
++++ b/libgcc/config/m68k/fixxfsi.c
+@@ -0,0 +1,48 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/fixtfsi.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++SItype
++__fixxfsi (XFtype a)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  USItype r;
++
++  FP_INIT_EXCEPTIONS;
++  FP_UNPACK_RAW_M (A, a);
++  FP_TO_INT_M (r, A, SI_BITS, 1);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/floatsixf.c b/libgcc/config/m68k/floatsixf.c
+new file mode 100644
+index 0000000..a5ec131
+--- /dev/null
++++ b/libgcc/config/m68k/floatsixf.c
+@@ -0,0 +1,46 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/floatsitf.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#define FP_NO_EXCEPTIONS
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++XFtype
++__floatsixf (SItype i)
++{
++  FP_DECL_M (A);
++  XFtype a;
++
++  FP_FROM_INT_M (A, i, SI_BITS, USItype);
++  FP_PACK_RAW_M (a, A);
++
++  return a;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/floatunsixf.c b/libgcc/config/m68k/floatunsixf.c
+new file mode 100644
+index 0000000..693a885
+--- /dev/null
++++ b/libgcc/config/m68k/floatunsixf.c
+@@ -0,0 +1,46 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/floatunsitf.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#define FP_NO_EXCEPTIONS
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++XFtype
++__floatunsixf (USItype i)
++{
++  FP_DECL_M (A);
++  XFtype a;
++
++  FP_FROM_INT_M (A, i, SI_BITS, USItype);
++  FP_PACK_RAW_M (a, A);
++
++  return a;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/fpgnulib.c b/libgcc/config/m68k/fpgnulib.c
+index a7d4258..dbb6bf0 100644
+--- a/libgcc/config/m68k/fpgnulib.c
++++ b/libgcc/config/m68k/fpgnulib.c
+@@ -2,9 +2,7 @@
+    functions which exist in libgcc, but for which there is not assembly
+    language versions in m68k/lb1sf68.S.
+ 
+-   It also includes simplistic support for extended floats (by working in
+-   double precision).  You must compile this file again with -DEXTFLOAT
+-   to get this support.  */
++   The extended precision routines are soft-fp's (t-floatlib).  */
+ 
+ /*
+ ** gnulib support for software floating point.
+@@ -70,15 +68,6 @@
+ 				(fp.l.lower >> 22))
+ #define MANTDMASK	0xFFFFFL /* mask of upper part */
+ 
+-/* the following deal with IEEE extended-precision numbers */
+-#define EXCESSX		16382L
+-#define HIDDENX		(1L << 31L)
+-#define EXPXBITS	15
+-#define EXPXMASK	0x7FFF
+-#define EXPX(fp)	(((fp.l.upper) >> 16) & EXPXMASK)
+-#define SIGNX(fp)	((fp.l.upper) & SIGNBIT)
+-#define MANTXMASK	0x7FFFFFFFL /* mask of upper part */
+-
+ union double_long
+ {
+   double d;
+@@ -92,19 +81,7 @@ union float_long {
+   float f;
+   long l;
+ };
+-
+-union long_double_long
+-{
+-  long double ld;
+-  struct
+-    {
+-      long upper;
+-      unsigned long middle;
+-      unsigned long lower;
+-    } l;
+-};
+ 
+-#ifndef EXTFLOAT
+ 
+ int
+ __unordsf2(float a, float b)
+@@ -392,298 +369,3 @@ __fixsfsi (float a1)
+   double foo = a1;
+   return __fixdfsi (foo);
+ }
+-
+-#else /* EXTFLOAT */
+-
+-/* We do not need these routines for coldfire, as it has no extended
+-   float format. */
+-#if !defined (__mcoldfire__)
+-
+-/* Primitive extended precision floating point support.
+-
+-   We assume all numbers are normalized, don't do any rounding, etc.  */
+-
+-/* Prototypes for the above in case we use them.  */
+-double __floatunsidf (unsigned long);
+-double __floatsidf (long);
+-float __floatsisf (long);
+-double __extendsfdf2 (float);
+-float __truncdfsf2 (double);
+-long __fixdfsi (double);
+-long __fixsfsi (float);
+-int __cmpdf2 (double, double);
+-
+-int
+-__unordxf2(long double a, long double b)
+-{
+-  union long_double_long ldl;
+-
+-  ldl.ld = a;
+-  if (EXPX(ldl) == EXPXMASK
+-      && ((ldl.l.middle & MANTXMASK) != 0 || ldl.l.lower != 0))
+-    return 1;
+-  ldl.ld = b;
+-  if (EXPX(ldl) == EXPXMASK
+-      && ((ldl.l.middle & MANTXMASK) != 0 || ldl.l.lower != 0))
+-    return 1;
+-  return 0;
+-}
+-
+-/* convert double to long double */
+-long double
+-__extenddfxf2 (double d)
+-{
+-  register union double_long dl;
+-  register union long_double_long ldl;
+-  register long exp;
+-
+-  dl.d = d;
+-  /*printf ("dfxf in: %g\n", d);*/
+-
+-  ldl.l.upper = SIGND (dl);
+-  if ((dl.l.upper & ~SIGNBIT) == 0 && !dl.l.lower)
+-    {
+-      ldl.l.middle = 0;
+-      ldl.l.lower = 0;
+-      return ldl.ld;
+-    }
+-
+-  exp = EXPD (dl) - EXCESSD + EXCESSX;
+-
+-  dl.l.upper &= MANTDMASK;
+-
+-  /* Recover from a denorm. */
+-  if (exp == -EXCESSD + EXCESSX)
+-    {
+-      exp++;
+-      while ((dl.l.upper & HIDDEND) == 0)
+-	{
+-	  exp--;
+-	  dl.l.upper = (dl.l.upper << 1) | (dl.l.lower >> 31);
+-	  dl.l.lower = dl.l.lower << 1;
+-	}
+-    }
+-
+-  /* Handle inf and NaN */
+-  else if (exp == EXPDMASK - EXCESSD + EXCESSX)
+-    {
+-      exp = EXPXMASK;
+-      /* Add hidden one bit for NaN */
+-      if (dl.l.upper != 0 || dl.l.lower != 0)
+-        dl.l.upper |= HIDDEND;
+-    }
+-  else
+-    {
+-      dl.l.upper |= HIDDEND;
+-    }
+-
+-  ldl.l.upper |= exp << 16;
+-  /* 31-20: # mantissa bits in ldl.l.middle - # mantissa bits in dl.l.upper */
+-  ldl.l.middle = dl.l.upper << (31 - 20);
+-  /* 1+20: explicit-integer-bit + # mantissa bits in dl.l.upper */
+-  ldl.l.middle |= dl.l.lower >> (1 + 20);
+-  /* 32 - 21: # bits of dl.l.lower in ldl.l.middle */
+-  ldl.l.lower = dl.l.lower << (32 - 21);
+-
+-  /*printf ("dfxf out: %s\n", dumpxf (ldl.ld));*/
+-  return ldl.ld;
+-}
+-
+-/* convert long double to double */
+-double
+-__truncxfdf2 (long double ld)
+-{
+-  register long exp;
+-  register union double_long dl;
+-  register union long_double_long ldl;
+-
+-  ldl.ld = ld;
+-  /*printf ("xfdf in: %s\n", dumpxf (ld));*/
+-
+-  dl.l.upper = SIGNX (ldl);
+-  if ((ldl.l.upper & ~SIGNBIT) == 0 && !ldl.l.middle && !ldl.l.lower)
+-    {
+-      dl.l.lower = 0;
+-      return dl.d;
+-    }
+-
+-  exp = EXPX (ldl) - EXCESSX + EXCESSD;
+-  /* Check for underflow and denormals. */
+-  if (exp <= 0)
+-    {
+-      long shift = 1 - exp;
+-      if (shift > 52)
+-	{
+-	  ldl.l.middle = 0;
+-	  ldl.l.lower = 0;
+-	}
+-      else if (shift >= 32)
+-	{
+-	  ldl.l.lower = (ldl.l.middle) >> (shift - 32);
+-          ldl.l.middle = 0;
+-	}
+-      else
+-	{
+-	  ldl.l.lower = (ldl.l.middle << (32 - shift)) | (ldl.l.lower >> shift);
+-          ldl.l.middle = ldl.l.middle >> shift;
+-	}
+-      exp = 0;
+-    }
+-  else if (exp == EXPXMASK - EXCESSX + EXCESSD)
+-    {
+-      exp = EXPDMASK;
+-      ldl.l.middle |= ldl.l.lower;
+-    }
+-  else if (exp >= EXPDMASK)
+-    {
+-      exp = EXPDMASK;
+-      ldl.l.middle = 0;
+-      ldl.l.lower = 0;
+-    }
+-  dl.l.upper |= exp << (32 - (EXPDBITS + 1));
+-  /* +1-1: add one for sign bit, but take one off for explicit-integer-bit */
+-  dl.l.upper |= (ldl.l.middle & MANTXMASK) >> (EXPDBITS + 1 - 1);
+-  dl.l.lower = (ldl.l.middle & MANTXMASK) << (32 - (EXPDBITS + 1 - 1));
+-  dl.l.lower |= ldl.l.lower >> (EXPDBITS + 1 - 1);
+-
+-  /*printf ("xfdf out: %g\n", dl.d);*/
+-  return dl.d;
+-}
+-
+-/* convert a float to a long double */
+-long double
+-__extendsfxf2 (float f)
+-{
+-  long double foo = __extenddfxf2 (__extendsfdf2 (f));
+-  return foo;
+-}
+-
+-/* convert a long double to a float */
+-float
+-__truncxfsf2 (long double ld)
+-{
+-  float foo = __truncdfsf2 (__truncxfdf2 (ld));
+-  return foo;
+-}
+-
+-/* convert an int to a long double */
+-long double
+-__floatsixf (long l)
+-{
+-  double foo = __floatsidf (l);
+-  return foo;
+-}
+-
+-/* convert an unsigned int to a long double */
+-long double
+-__floatunsixf (unsigned long l)
+-{
+-  double foo = __floatunsidf (l);
+-  return foo;
+-}
+-
+-/* convert a long double to an int */
+-long
+-__fixxfsi (long double a)
+-{
+-  union long_double_long ldl;
+-  long exp;
+-
+-  ldl.ld = a;
+-
+-  exp = EXPX (ldl);
+-  if (exp == 0 && ldl.l.middle == 0 && ldl.l.lower == 0)
+-    return 0;
+-
+-  exp = exp - EXCESSX - 32;
+-
+-  if (exp >= 0)
+-    {
+-      /* Return largest integer.  */
+-      return SIGNX (ldl) ? 0x80000000L : 0x7fffffffL;
+-    }
+-
+-  if (exp <= -32)
+-    return 0;
+-
+-  ldl.l.middle >>= -exp;
+-
+-  return SIGNX (ldl) ? -ldl.l.middle : ldl.l.middle;
+-}
+-
+-/* The remaining provide crude math support by working in double precision.  */
+-
+-long double
+-__addxf3 (long double x1, long double x2)
+-{
+-  return (double) x1 + (double) x2;
+-}
+-
+-long double
+-__subxf3 (long double x1, long double x2)
+-{
+-  return (double) x1 - (double) x2;
+-}
+-
+-long double
+-__mulxf3 (long double x1, long double x2)
+-{
+-  return (double) x1 * (double) x2;
+-}
+-
+-long double
+-__divxf3 (long double x1, long double x2)
+-{
+-  return (double) x1 / (double) x2;
+-}
+-
+-long double
+-__negxf2 (long double x1)
+-{
+-  return - (double) x1;
+-}
+-
+-long
+-__cmpxf2 (long double x1, long double x2)
+-{
+-  return __cmpdf2 ((double) x1, (double) x2);
+-}
+-
+-long
+-__eqxf2 (long double x1, long double x2)
+-{
+-  return __cmpdf2 ((double) x1, (double) x2);
+-}
+-
+-long
+-__nexf2 (long double x1, long double x2)
+-{
+-  return __cmpdf2 ((double) x1, (double) x2);
+-}
+-
+-long
+-__ltxf2 (long double x1, long double x2)
+-{
+-  return __cmpdf2 ((double) x1, (double) x2);
+-}
+-
+-long
+-__lexf2 (long double x1, long double x2)
+-{
+-  return __cmpdf2 ((double) x1, (double) x2);
+-}
+-
+-long
+-__gtxf2 (long double x1, long double x2)
+-{
+-  return __cmpdf2 ((double) x1, (double) x2);
+-}
+-
+-long
+-__gexf2 (long double x1, long double x2)
+-{
+-  return __cmpdf2 ((double) x1, (double) x2);
+-}
+-
+-#endif /* !__mcoldfire__ */
+-#endif /* EXTFLOAT */
+diff --git a/libgcc/config/m68k/gexf2.c b/libgcc/config/m68k/gexf2.c
+new file mode 100644
+index 0000000..50c8d27
+--- /dev/null
++++ b/libgcc/config/m68k/gexf2.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/getf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++CMPtype
++__gexf2 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  CMPtype r;
++
++  FP_INIT_EXCEPTIONS;
++  FP_UNPACK_RAW_M (A, a);
++  FP_UNPACK_RAW_M (B, b);
++  FP_CMP_M (r, A, B, -2, 2);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++
++strong_alias (__gexf2, __gtxf2);
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/lexf2.c b/libgcc/config/m68k/lexf2.c
+new file mode 100644
+index 0000000..3b44e7b
+--- /dev/null
++++ b/libgcc/config/m68k/lexf2.c
+@@ -0,0 +1,54 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/letf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++CMPtype
++__lexf2 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  CMPtype r;
++
++  FP_INIT_EXCEPTIONS;
++  FP_UNPACK_RAW_M (A, a);
++  FP_UNPACK_RAW_M (B, b);
++  FP_CMP_M (r, A, B, 2, 2);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++
++strong_alias (__lexf2, __ltxf2);
++/* What fpgnulib.c provided: unordered compares above, as __lexf2.  */
++strong_alias (__lexf2, __cmpxf2);
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/mulxf3.c b/libgcc/config/m68k/mulxf3.c
+new file mode 100644
+index 0000000..bda9dc3
+--- /dev/null
++++ b/libgcc/config/m68k/mulxf3.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/multf3.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++XFtype
++__mulxf3 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  FP_DECL_M (R);
++  XFtype r;
++
++  FP_INIT_ROUNDMODE;
++  FP_UNPACK_M (A, a);
++  FP_UNPACK_M (B, b);
++  FP_MUL_M (R, A, B);
++  FP_PACK_M (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/negxf2.c b/libgcc/config/m68k/negxf2.c
+new file mode 100644
+index 0000000..20bb891
+--- /dev/null
++++ b/libgcc/config/m68k/negxf2.c
+@@ -0,0 +1,47 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/negtf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++XFtype
++__negxf2 (XFtype a)
++{
++  FP_DECL_M (A);
++  FP_DECL_M (R);
++  XFtype r;
++
++  FP_UNPACK_RAW_M (A, a);
++  FP_NEG_M (R, A);
++  FP_PACK_RAW_M (r, R);
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/sfp-machine.h b/libgcc/config/m68k/sfp-machine.h
+new file mode 100644
+index 0000000..3657d3b
+--- /dev/null
++++ b/libgcc/config/m68k/sfp-machine.h
+@@ -0,0 +1,78 @@
++/* Software floating-point machine description for m68k: the extended
++   precision (XFmode) routines (t-floatlib).
++   Copyright (C) 2026 Free Software Foundation, Inc.
++
++This file is part of GCC.
++
++GCC is free software; you can redistribute it and/or modify it under
++the terms of the GNU General Public License as published by the Free
++Software Foundation; either version 3, or (at your option) any later
++version.
++
++GCC is distributed in the hope that it will be useful, but WITHOUT ANY
++WARRANTY; without even the implied warranty of MERCHANTABILITY or
++FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++for more details.
++
++Under Section 7 of GPL version 3, you are granted additional
++permissions described in the GCC Runtime Library Exception, version
++3.1, as published by the Free Software Foundation.
++
++You should have received a copy of the GNU General Public License and
++a copy of the GCC Runtime Library Exception along with this program;
++see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
++<http://www.gnu.org/licenses/>.  */
++
++/* Words of 64 bits, so that the extended format's working fraction (67
++   bits) fills the top of two of them: soft-fp's addition clears the bits
++   a borrow leaves above the fraction only in its most significant word.
++   The 64-bit products and quotients come from longlong.h's C.  */
++#define _FP_W_TYPE_SIZE		64
++#define _FP_W_TYPE		unsigned long long
++#define _FP_WS_TYPE		signed long long
++#define _FP_I_TYPE		int
++
++/* The type of the result of a floating point comparison.  This must
++   match `__libgcc_cmp_return__' in GCC for the target.  */
++typedef int __gcc_CMPtype __attribute__ ((mode (__libgcc_cmp_return__)));
++#define CMPtype __gcc_CMPtype
++
++/* Only the extended format computes here; single and double precision
++   are converted to and from it.  */
++#define _FP_MUL_MEAT_M(R,X,Y)				\
++  _FP_MUL_MEAT_2_wide(_FP_WFRACBITS_M,R,X,Y,umul_ppmm)
++#define _FP_DIV_MEAT_M(R,X,Y)	_FP_DIV_MEAT_2_udiv(M,R,X,Y)
++
++/* The MC68881's default NaN: positive, every fraction bit set.  The
++   fractions are in the packed position, the most significant word
++   first; extended-m68k.h adds the explicit integer bit.  */
++#define _FP_NANFRAC_S		((_FP_QNANBIT_S << 1) - 1)
++#define _FP_NANFRAC_D		((_FP_QNANBIT_D << 1) - 1)
++#define _FP_NANFRAC_M		0, ((_FP_QNANBIT_M << 1) - 1)
++#define _FP_NANSIGN_S		0
++#define _FP_NANSIGN_D		0
++#define _FP_NANSIGN_M		0
++
++#define _FP_KEEPNANFRACP	1
++#define _FP_QNANNEGATEDP	0
++
++/* With two NaN operands the MC68881 returns the destination's, which is
++   the first operand of these routines (a + b is FADD b,a).  */
++#define _FP_CHOOSENAN(fs, wc, R, X, Y, OP)	\
++  do {						\
++    R##_s = X##_s;				\
++    _FP_FRAC_COPY_##wc(R,X);			\
++    R##_c = FP_CLS_NAN;				\
++  } while (0)
++
++/* The MC68881 detects underflow before rounding.  */
++#define _FP_TININESS_AFTER_ROUNDING 0
++
++#define	__LITTLE_ENDIAN	1234
++#define	__BIG_ENDIAN	4321
++#define __BYTE_ORDER	__BIG_ENDIAN
++
++/* Define ALIASNAME as a strong alias for NAME.  */
++#define strong_alias(name, aliasname) _strong_alias(name, aliasname)
++#define _strong_alias(name, aliasname) \
++  extern __typeof (name) aliasname __attribute__ ((alias (#name)));
+diff --git a/libgcc/config/m68k/subxf3.c b/libgcc/config/m68k/subxf3.c
+new file mode 100644
+index 0000000..896c04d
+--- /dev/null
++++ b/libgcc/config/m68k/subxf3.c
+@@ -0,0 +1,52 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/subtf3.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++XFtype
++__subxf3 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  FP_DECL_M (R);
++  XFtype r;
++
++  FP_INIT_ROUNDMODE;
++  FP_UNPACK_SEMIRAW_M (A, a);
++  FP_UNPACK_SEMIRAW_M (B, b);
++  FP_SUB_M (R, A, B);
++  FP_PACK_SEMIRAW_M (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/t-floatlib b/libgcc/config/m68k/t-floatlib
+index 1ee8782..8e409cc 100644
+--- a/libgcc/config/m68k/t-floatlib
++++ b/libgcc/config/m68k/t-floatlib
+@@ -4,8 +4,11 @@ LIB1ASMFUNCS = _mulsi3 _udivsi3 _divsi3 _umodsi3 _modsi3 \
+    _eqdf2 _nedf2 _gtdf2 _gedf2 _ltdf2 _ledf2 \
+    _eqsf2 _nesf2 _gtsf2 _gesf2 _ltsf2 _lesf2
+ 
+-LIB2ADD = $(srcdir)/config/m68k/fpgnulib.c xfgnulib.c
++# The extended precision routines: soft-fp, in the m68k format
++# (extended-m68k.h).  They are empty for ColdFire, which has no XFmode.
++m68k-xf-funcs = addxf3 subxf3 mulxf3 divxf3 negxf2 eqxf2 gexf2 lexf2 \
++   unordxf2 extendsfxf2 extenddfxf2 truncxfsf2 truncxfdf2 fixxfsi \
++   floatsixf floatunsixf
+ 
+-xfgnulib.c: $(srcdir)/config/m68k/fpgnulib.c
+-	echo '#define EXTFLOAT' > xfgnulib.c
+-	cat $< >> xfgnulib.c
++LIB2ADD = $(srcdir)/config/m68k/fpgnulib.c \
++   $(addprefix $(srcdir)/config/m68k/,$(addsuffix .c,$(m68k-xf-funcs)))
+diff --git a/libgcc/config/m68k/truncxfdf2.c b/libgcc/config/m68k/truncxfdf2.c
+new file mode 100644
+index 0000000..e88346b
+--- /dev/null
++++ b/libgcc/config/m68k/truncxfdf2.c
+@@ -0,0 +1,51 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/trunctfdf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "soft-fp/double.h"
++#include "extended-m68k.h"
++
++DFtype
++__truncxfdf2 (XFtype a)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_D (R);
++  DFtype r;
++
++  FP_INIT_ROUNDMODE;
++  FP_UNPACK_SEMIRAW_M (A, a);
++  FP_TRUNC (D, M, 1, 2, R, A);
++  FP_PACK_SEMIRAW_D (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/truncxfsf2.c b/libgcc/config/m68k/truncxfsf2.c
+new file mode 100644
+index 0000000..e82699c
+--- /dev/null
++++ b/libgcc/config/m68k/truncxfsf2.c
+@@ -0,0 +1,51 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/trunctfsf2.c).
++   Copyright (C) 1997-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "soft-fp/single.h"
++#include "extended-m68k.h"
++
++SFtype
++__truncxfsf2 (XFtype a)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_S (R);
++  SFtype r;
++
++  FP_INIT_ROUNDMODE;
++  FP_UNPACK_SEMIRAW_M (A, a);
++  FP_TRUNC (S, M, 1, 2, R, A);
++  FP_PACK_SEMIRAW_S (r, R);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */
+diff --git a/libgcc/config/m68k/unordxf2.c b/libgcc/config/m68k/unordxf2.c
+new file mode 100644
+index 0000000..2d6b946
+--- /dev/null
++++ b/libgcc/config/m68k/unordxf2.c
+@@ -0,0 +1,50 @@
++/* Software floating-point emulation, m68k extended precision (from
++   soft-fp/unordtf2.c).
++   Copyright (C) 2006-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   In addition to the permissions in the GNU Lesser General Public
++   License, the Free Software Foundation gives you unlimited
++   permission to link the compiled version of this file into
++   combinations with other programs, and to distribute those
++   combinations without any restriction coming from the use of this
++   file.  (The Lesser General Public License restrictions do apply in
++   other respects; for example, they cover modification of the file,
++   and distribution when not linked into a combine executable.)
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#if !defined (__mcoldfire__)
++
++#include "soft-fp/soft-fp.h"
++#include "extended-m68k.h"
++
++CMPtype
++__unordxf2 (XFtype a, XFtype b)
++{
++  FP_DECL_EX;
++  FP_DECL_M (A);
++  FP_DECL_M (B);
++  CMPtype r;
++
++  FP_INIT_EXCEPTIONS;
++  FP_UNPACK_RAW_M (A, a);
++  FP_UNPACK_RAW_M (B, b);
++  FP_CMP_UNORD_M (r, A, B, 1);
++  FP_HANDLE_EXCEPTIONS;
++
++  return r;
++}
++#endif /* !__mcoldfire__ */

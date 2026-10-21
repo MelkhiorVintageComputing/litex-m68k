@@ -172,9 +172,15 @@ toolchain for the 68030 with hard float, the kernel from `patches/linux`, a cpio
 initramfs; `litex_rd68031_fpu_defconfig`. Gate: boots to a login on the Wukong, and
 `l7_test.py` passes against it.
 
-**L9 — later, noted.** The FPU-less variant with a soft-float userspace; ethernet and
-SD card (device tree for m68k, or platform data for liteeth and litex_mmc);
-upstreaming `arch/m68k/litex` (the RD68884 fix is upstream: 7a188db).
+**L9 — the FPU-less variant.** *Done, in litex_sim and on the Wukong: `doc/l9-nofpu.md`.*
+RD68031 alone with a soft-float buildroot (`litex_rd68031_nofpu_defconfig`): musl,
+gcc defaulting to soft float, libgcc's `long double` made exact (`patches/gcc`),
+musl's setjmp without FPU registers (`patches/musl`), the kernel with its FPU
+emulator, and a post-build check that no FPU instruction is left.
+
+**Later, noted.** Ethernet and SD card (device tree for m68k, or platform data for
+liteeth and litex_mmc); upstreaming `arch/m68k/litex` and `patches/gcc`,
+`patches/musl` (the RD68884 fix is upstream: 7a188db).
 
 **Later (out of this plan's scope, noted for design choices now):**
 - Hard CPU: reuse the bridge as the FPGA-side slave with pin I/O + synchronisers;

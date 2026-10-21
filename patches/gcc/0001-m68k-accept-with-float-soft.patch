@@ -1,0 +1,78 @@
+From d92797096b6e56d4734be06002af5c393b018dcd Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Wed, 21 Oct 2026 13:22:08 +0200
+Subject: [PATCH 1/3] m68k: accept --with-float=soft
+
+A 68020 or 68030 without its 68881 (or a 68040 or 68060 without an
+FPU) has no way to get a soft-float default: -mcpu=68020 and up imply
+-mhard-float, m68k*-*-linux* builds no soft-float multilib, and config.gcc
+rejects --with-float for m68k. A compiler for such a Linux system then
+builds libgcc hard-float, which a -msoft-float program cannot use: on
+m68k Linux the ABI returns floating-point values in %fp0 with an FPU and
+in %d0/%d1 without.
+
+With --with-float=soft, MASK_HARD_FLOAT is not part of the CPU's default
+flags; -mhard-float still turns it on. --with-float=hard, or none, keeps
+the current default.
+
+gcc/ChangeLog:
+
+	* config.gcc (m68k*-*-*): Accept --with-float=hard and soft;
+	soft defines M68K_DEFAULT_SOFT_FLOAT.
+	* config/m68k/m68k.cc (m68k_option_override): Under
+	M68K_DEFAULT_SOFT_FLOAT, do not default to MASK_HARD_FLOAT.
+---
+ gcc/config.gcc          | 16 +++++++++++++++-
+ gcc/config/m68k/m68k.cc |  3 +++
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+index eb09eed..06e427f 100644
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -4554,7 +4554,7 @@ case "${target}" in
+ 		;;
+ 
+ 	fido-*-* | m68k*-*-*)
+-		supported_defaults="arch cpu"
++		supported_defaults="arch cpu float"
+ 		case "$with_arch" in
+ 		"" | "m68k"| "cf")
+ 			m68k_arch_family="$with_arch"
+@@ -4565,6 +4565,20 @@ case "${target}" in
+ 			;;
+ 		esac
+ 
++		# --with-float=soft: no FPU unless -mhard-float is given, for
++		# every CPU (a 68020 or 68030 without its 68881, for one).
++		case "$with_float" in
++		"" | "hard")
++			;;
++		"soft")
++			tm_defines="$tm_defines M68K_DEFAULT_SOFT_FLOAT=1"
++			;;
++		*)
++			echo "Unknown floating point type used in --with-float=$with_float" 1>&2
++			exit 1
++			;;
++		esac
++
+ 		# We always have a $with_cpu setting here.
+ 		case "$with_cpu" in
+ 		"m68000" | "m68010" | "m68020" | "m68030" | "m68040" | "m68060")
+diff --git a/gcc/config/m68k/m68k.cc b/gcc/config/m68k/m68k.cc
+index d8fa6e0..4b41634 100644
+--- a/gcc/config/m68k/m68k.cc
++++ b/gcc/config/m68k/m68k.cc
+@@ -565,8 +565,11 @@ m68k_option_override (void)
+     target_mask |= MASK_BITFIELD;
+   if ((m68k_cpu_flags & FL_CF_HWDIV) != 0)
+     target_mask |= MASK_CF_HWDIV;
++  /* Configured --with-float=soft, the FPU is used only if asked for.  */
++#ifndef M68K_DEFAULT_SOFT_FLOAT
+   if ((m68k_cpu_flags & (FL_68881 | FL_CF_FPU)) != 0)
+     target_mask |= MASK_HARD_FLOAT;
++#endif
+   target_flags |= target_mask & ~target_flags_explicit;
+ 
+   /* Set the directly-usable versions of the -mcpu and -mtune settings.  */

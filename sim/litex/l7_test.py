@@ -46,7 +46,7 @@ SHELL_PROMPT = "l7# "
 COMMANDS = [
     ("echo sum $((6*7)) product $((123*457))", r"sum 42 product 56211"),
     ("uname -m -r",                            r"7\.2\.9-litex m68k"),
-    ("grep -E '^(CPU|MMU|FPU):' /proc/cpuinfo", r"CPU:\s+68030\nMMU:\s+68030\nFPU:\s+68881"),
+    ("grep -E '^(CPU|MMU|FPU):' /proc/cpuinfo", r"CPU:\s+68030\nMMU:\s+68030\nFPU:\s+{fpu}"),
     ("seq 1 200 | md5sum",                     r"304f7b9574921ad21a2bc72f200483d7"),
     ("echo hello > /f; wc -c < /f; rm /f",     r"^6$"),
     ("awk 'BEGIN{printf \"%.6f\\n\", atan2(1,1)*4}'", r"3\.141593"),
@@ -58,12 +58,17 @@ COMMANDS = [
      "awk \"$S\" & awk \"$S\"; wait",            r"109571\.690503\n109571\.690503"),
 ]
 
-# --login (buildroot, doc/l8-buildroot.md): what only its userspace has. glibc
-# dynamically linked, and Lua's doubles through glibc's libm, which uses the
-# FPU's own transcendentals (the values are the host's).
+# --login (buildroot, doc/l8-buildroot.md, doc/l9-nofpu.md): what only its
+# userspace has. Its C library, dynamically linked: glibc with the FPU, musl's
+# soft-float ABI without. Lua's doubles: through glibc's libm, which uses the
+# FPU's own transcendentals, or in software (the values are the host's).
 LOGIN_COMMANDS = [
     ("grep ^NAME= /etc/os-release",            r'NAME=Buildroot'),
-    ("ls /lib/libc.so.6",                      r"^/lib/libc\.so\.6$"),
+    ("ls {libc}",                              r"^{libc_re}$"),
+    # Decimal conversion, which a C library may do in long double: musl's
+    # printf without an FPU was wrong until patches/gcc 0003.
+    ("awk 'BEGIN{printf \"%.6f %g %.17g\\n\", 2/3, 1e100, 0.1}'",
+                                               r"0\.666667 1e\+100 0\.10000000000000001"),
     ("lua -e 'print(string.format(\"%.12f\", math.sin(1)+math.exp(1)+math.log(10)+math.atan(0.5)+math.sqrt(2)))'",
                                                r"7\.740199077635"),
     ("lua -e 's=0 for i=1,2000 do s=s+math.sin(i)*math.cos(i/3) end print(string.format(\"%.9f\", s))'",
@@ -104,11 +109,15 @@ def main():
     parser.add_argument("--login", action="store_true",
         help="The userspace logs in on a getty (buildroot's) instead of linux/build.sh's "
              "/init report and shell: log in as root, and add LOGIN_COMMANDS.")
-    parser.add_argument("--command-timeout", default=1800, type=float,
-        help="Seconds for each command of the set. In the simulation, the two awk take 850 s on L7's BusyBox, longer on buildroot's.")
+    parser.add_argument("--command-timeout", default=None, type=float,
+        help="Seconds for each command of the set (default 1800, 7200 without the FPU). "
+             "In the simulation, the two awk take 850 s on L7's BusyBox, longer on buildroot's; "
+             "without the FPU, Lua's 2000-term loop takes 2800 s.")
     parser.add_argument("--boot-timeout", default=3600, type=float,
         help="Seconds from litexboot to the shell (the simulation takes tens of minutes).")
     args = parser.parse_args()
+    if args.command_timeout is None:
+        args.command_timeout = 1800 if "fpu" in args.variant else 7200
     sys_clk = args.sys_clk if args.sys_clk is not None else (0 if args.serial else 100e6)
 
     build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant, "l7"))
@@ -198,7 +207,13 @@ def main():
 
         # 4. The command set.
         before = interrupts(con)
+        fpu = "fpu" in args.variant
+        libc = "/lib/libc.so.6" if fpu else "/lib/ld-musl-m68k-sf.so.1"
+        subst = dict(fpu="68881" if fpu else "none", libc=libc, libc_re=re.escape(libc))
         for cmd, want in COMMANDS + (LOGIN_COMMANDS if args.login else []):
+            cmd = cmd.replace("{libc}", libc)
+            for k, v in subst.items():
+                want = want.replace("{" + k + "}", v)
             t = time.time()
             ans = con.command(cmd, timeout=args.command_timeout, until=SHELL_PROMPT)
             print("\n[l7_test] {:.0f} s".format(time.time() - t), flush=True)

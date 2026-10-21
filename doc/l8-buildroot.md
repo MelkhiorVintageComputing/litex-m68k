@@ -5,7 +5,7 @@ the same kernel as L7: Linux 7.2.9 with `patches/linux`, the m68k LiteX machine.
 SoC, litexboot and the way the images reach main RAM are L7's (`doc/l7-linux.md`).
 
 ```sh
-buildroot/build.sh                    # -> ~/LITEX-68K/build/buildroot-fpu/images
+buildroot/build.sh fpu                # -> ~/LITEX-68K/build/buildroot-fpu/images
 sim/litex/l7_test.py --login --linux-dir ~/LITEX-68K/build/buildroot-fpu/images \
     --build-dir sim/litex/build/standard+fpu/l8          # in litex_sim
 sim/litex/l7_test.py --login --linux-dir ~/LITEX-68K/build/buildroot-fpu/images \
@@ -50,10 +50,13 @@ sim/litex/l7_test.py --login --linux-dir ~/LITEX-68K/build/buildroot-fpu/images 
   - Buildroot 2026.08 comes from `linux/fetch.sh` (`linux/MANIFEST`: the
     sha256 the release's signed hash file gives). It is unpacked, never
     changed, into `~/LITEX-68K/src/buildroot-2026.08`.
-  - The output is `~/LITEX-68K/build/buildroot-fpu`, the downloads
+  - Its first argument is the defconfig, `fpu` (this one, the default) or
+    `nofpu` (L9, `doc/l9-nofpu.md`).
+  - The output is `~/LITEX-68K/build/buildroot-<variant>`, the downloads
     `~/LITEX-68K/dl/buildroot`. `BR2_JLEVEL` is 4 (CLAUDE.md).
-  - Extra arguments are make targets: `buildroot/build.sh "" linux-rebuild`
-    rebuilds the kernel after a change in `patches/linux`'s tree.
+  - Further arguments are make targets: `buildroot/build.sh fpu
+    linux-rebuild` rebuilds the kernel after a change in `patches/linux`'s
+    tree.
 - **`l7_test.py --login`** waits for the getty's `login:`, logs in as root, and
   runs L7's command set and `LOGIN_COMMANDS`:
   - `/etc/os-release` is buildroot's, and `/lib/libc.so.6` is there: the

@@ -1,0 +1,43 @@
+From 223375746f559267b33daccc8458eb72345ed2d8 Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Wed, 21 Oct 2026 13:49:30 +0200
+Subject: [PATCH 2/3] m68k: musl's soft-float dynamic linker for -msoft-float
+
+musl's m68k port has a soft-float ABI, whose dynamic linker is
+/lib/ld-musl-m68k-sf.so.1 (arch/m68k/reloc.h, without __HAVE_68881__
+or __mcffpu__). gcc linked every program against /lib/ld-musl-m68k.so.1,
+the hard-float one, so a soft-float program would not start.
+
+Add -sf with -msoft-float, as mips does, and by default when gcc is
+configured --with-float=soft (M68K_DEFAULT_SOFT_FLOAT) unless
+-mhard-float is given.
+
+gcc/ChangeLog:
+
+	* config/m68k/linux.h (MUSL_FLOAT_SUFFIX): New.
+	(MUSL_DYNAMIC_LINKER): Use it.
+---
+ gcc/config/m68k/linux.h | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/config/m68k/linux.h b/gcc/config/m68k/linux.h
+index 0cf5e13..9aba39a 100644
+--- a/gcc/config/m68k/linux.h
++++ b/gcc/config/m68k/linux.h
+@@ -73,8 +73,15 @@ along with GCC; see the file COPYING3.  If not see
+ 
+ #define GLIBC_DYNAMIC_LINKER "/lib/ld.so.1"
+ 
++/* musl names its soft-float dynamic linker ld-musl-m68k-sf.so.1.  */
++#ifdef M68K_DEFAULT_SOFT_FLOAT
++#define MUSL_FLOAT_SUFFIX "%{!mhard-float:-sf}"
++#else
++#define MUSL_FLOAT_SUFFIX "%{msoft-float:-sf}"
++#endif
++
+ #undef MUSL_DYNAMIC_LINKER
+-#define MUSL_DYNAMIC_LINKER "/lib/ld-musl-m68k.so.1"
++#define MUSL_DYNAMIC_LINKER "/lib/ld-musl-m68k" MUSL_FLOAT_SUFFIX ".so.1"
+ 
+ #undef LINK_SPEC
+ #define LINK_SPEC "-m m68kelf %{shared} \

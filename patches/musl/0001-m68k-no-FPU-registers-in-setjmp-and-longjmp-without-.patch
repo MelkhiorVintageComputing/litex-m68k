@@ -1,0 +1,53 @@
+From 43e0f26434bf2aa239d65a14b7d6983884a58d42 Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Wed, 21 Oct 2026 13:48:17 +0200
+Subject: [PATCH] m68k: no FPU registers in setjmp and longjmp without an FPU
+
+setjmp and longjmp save and restore %fp2-%fp7 with fmovem.x whatever
+the ABI. In the soft-float one (ld-musl-m68k-sf.so.1, a 68020 or later
+built with -msoft-float) there are no such registers to keep, and on a
+CPU without an FPU each is a line-F trap: an illegal instruction, or a
+trip through the kernel's FPU emulator where there is one.
+
+Preprocess both files and keep the FPU registers only when there is an
+FPU, as the C sources do (__HAVE_68881__, __mcffpu__). The jmp_buf
+layout does not change.
+---
+ src/setjmp/m68k/{longjmp.s => longjmp.S} | 2 ++
+ src/setjmp/m68k/{setjmp.s => setjmp.S}   | 2 ++
+ 2 files changed, 4 insertions(+)
+ rename src/setjmp/m68k/{longjmp.s => longjmp.S} (86%)
+ rename src/setjmp/m68k/{setjmp.s => setjmp.S} (88%)
+
+diff --git a/src/setjmp/m68k/longjmp.s b/src/setjmp/m68k/longjmp.S
+similarity index 86%
+rename from src/setjmp/m68k/longjmp.s
+rename to src/setjmp/m68k/longjmp.S
+index cdb05fb..8546b4b 100644
+--- a/src/setjmp/m68k/longjmp.s
++++ b/src/setjmp/m68k/longjmp.S
+@@ -9,6 +9,8 @@ longjmp:
+ 	bne 1f
+ 	move.l #1,%d0
+ 1:	movem.l (%a0),%d2-%d7/%a2-%a7
++#if __HAVE_68881__ || __mcffpu__
+ 	fmovem.x 52(%a0),%fp2-%fp7
++#endif
+ 	move.l 48(%a0),(%sp)
+ 	rts
+diff --git a/src/setjmp/m68k/setjmp.s b/src/setjmp/m68k/setjmp.S
+similarity index 88%
+rename from src/setjmp/m68k/setjmp.s
+rename to src/setjmp/m68k/setjmp.S
+index 15e549b..5d5fc3e 100644
+--- a/src/setjmp/m68k/setjmp.s
++++ b/src/setjmp/m68k/setjmp.S
+@@ -13,6 +13,8 @@ setjmp:
+ 	movea.l 4(%sp),%a0
+ 	movem.l %d2-%d7/%a2-%a7,(%a0)
+ 	move.l (%sp),48(%a0)
++#if __HAVE_68881__ || __mcffpu__
+ 	fmovem.x %fp2-%fp7,52(%a0)
++#endif
+ 	clr.l %d0
+ 	rts
