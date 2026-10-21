@@ -12,5 +12,6 @@ One subdirectory per project, named after it (`patches/litex/`, `patches/RD68031
   changes, why this project needs it, and its upstream status (not sent, sent, merged).
 
 - `linux/`: Linux 7.2.9, the m68k LiteX machine (L7, `doc/l7-linux.md`).
-- `RD68884/`: the FPU's microcode, FSAVE during the release of a
-  register-to-register instruction (L7, `doc/l7-linux.md`).
+- `RD68884/`: none now. L7's fix for FSAVE during the release of a
+  register-to-register instruction was replaced by upstream's own, RD68884
+  7a188db (`doc/l7-linux.md`). `scripts/patch_rd68884.sh` applies any that come.

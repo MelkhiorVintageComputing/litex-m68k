@@ -72,7 +72,7 @@ sim/litex/l7_test.py --serial /dev/ttyUSB0 --speed 1000000 \
   quiet: the UART's and the timer's events off and cleared, the interrupt
   mask 0. The simulation booted through it without the fix; why it did not
   hit it there is not known.
-- **FSAVE in RD68884's release wait** (`patches/RD68884/`). On the board,
+- **FSAVE in RD68884's release wait** (fixed upstream, RD68884 7a188db). On the board,
   Linux froze completely, not even echoing, as soon as two processes using
   the FPU preempted each other. Two `seq` running at once was enough. Integer
   work preempted, and FPU work alone, were fine. litex_sim froze the same way.
@@ -89,17 +89,24 @@ sim/litex/l7_test.py --serial /dev/ttyUSB0 --speed 1000000 \
     FSAVE meanwhile got come-again ($0118) forever. Earlier switches had
     landed elsewhere and worked.
   - **The fix.** That wait in RD68884's microcode, register to register and
-    FMOVECR, looked only for the response read. It now also answers a save
-    request, with an idle frame and the instruction pending, as RD68884's
-    memory-source paths already did. RD68031 was right throughout.
+    FMOVECR, looked only for the response read. RD68031 was right throughout.
+    - **Ours, at first:** `patches/RD68884` made the wait a call to the
+      memory-source paths' wait, which also answers a save request with an
+      idle frame and the instruction pending. That cost register-to-register
+      instructions a clock.
+    - **Upstream's, which replaced it (7a188db):** the wait ends on either
+      event (`COND_RESP_SAVE`), then branches to the same save. The
+      register-to-register path costs nothing; FMOVECR takes one clock more.
+      It also fixes a frame that the MC68882 build saved before the CU's
+      first primitive was read.
   - On the way, both bridges got a coprocessor time-out
     (`coprocessor_timeout`, 1024 clocks). A cycle to the FPU that nothing
     answers now ends in a bus error, as a board's bus watchdog would, instead
     of holding the CPU forever. It was not this freeze: there, every cycle was
     answered, with come-again.
-  - The patch adds an ISS test for the sequence to RD68884's own tests.
-    `scripts/patch_rd68884.sh` makes the patched copy that
-    `scripts/sync_pythondata.sh` packages.
+  - Upstream's commit carries the ISS test from our patch, for both models,
+    and a test of the sequence on its RTL (`fpu_m10`, section H).
+    `scripts/sync_pythondata.sh` packages `Inputs/RD68884` as it is again.
 - **`console=liteuart0`**, not `console=liteuart`. `console=` doubles as an
   earlycon alias (`earlycon.c`), and `liteuart` alone matches liteuart's
   earlycon with no address: "Malformed early option".
@@ -121,3 +128,8 @@ sim/litex/l7_test.py --serial /dev/ttyUSB0 --speed 1000000 \
 | Two awk preempting each other, `sqrt` sums | both exact | both exact |
 | Stress, from a fresh load: two `seq 1 30000` ×3, two awk `sqrt` sums of 20,000 terms ×5 | | pass, every sum exact (it froze before the fix) |
 | `fpswitch` (200 switches) | pass: 200 idle frames, results bit-exact; froze at the 8th switch before the fix | |
+
+With upstream's fix (RD68884 7a188db, bitstream WNS 0.112 ns), each from a fresh
+load on the Wukong: L7's command set, L8's (`doc/l8-buildroot.md`), the stress
+above, and two Lua processes preempting each other ×3 under buildroot, all pass
+with every sum exact. `fpswitch` in litex_sim: 200 idle frames, bit-exact.

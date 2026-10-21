@@ -165,7 +165,7 @@ writes the bootinfo. Images go by `litex_term --images` at 1 Mbaud on the board,
 and by `--ram-init` in litex_sim. A BusyBox initramfs and `sim/litex/l7_test.py`'s
 command set, modelled on RD68031's rd-virt. Two FPU processes preempting each other
 froze the machine: an FSAVE that RD68884's microcode never answered
-(`patches/RD68884`, reduced to `sim/litex/fpswitch`).
+(reduced to `sim/litex/fpswitch`; fixed upstream in RD68884 7a188db).
 
 **L8 — buildroot.** *Done, in litex_sim and on the Wukong: `doc/l8-buildroot.md`.* A br2-external tree (`buildroot/`), buildroot's internal glibc
 toolchain for the 68030 with hard float, the kernel from `patches/linux`, a cpio
@@ -174,7 +174,7 @@ initramfs; `litex_rd68031_fpu_defconfig`. Gate: boots to a login on the Wukong, 
 
 **L9 — later, noted.** The FPU-less variant with a soft-float userspace; ethernet and
 SD card (device tree for m68k, or platform data for liteeth and litex_mmc);
-upstreaming `arch/m68k/litex` and the RD68884 fix.
+upstreaming `arch/m68k/litex` (the RD68884 fix is upstream: 7a188db).
 
 **Later (out of this plan's scope, noted for design choices now):**
 - Hard CPU: reuse the bridge as the FPGA-side slave with pin I/O + synchronisers;

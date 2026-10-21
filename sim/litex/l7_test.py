@@ -53,7 +53,7 @@ COMMANDS = [
     ("for i in 1 2 3; do echo loop$i; done | sort -r | tr '\\n' ' '", r"loop3 loop2 loop1"),
     ("cat /proc/cmdline",                      r"console=liteuart0"),
     # Two processes using the FPU, preempting each other: the FPU saved and
-    # restored by the scheduler (patches/RD68884, doc/l7-linux.md).
+    # restored by the scheduler (RD68884 7a188db, doc/l7-linux.md).
     ("S='BEGIN{s=0;for(i=1;i<=3000;i++)s+=sqrt(i);printf \"%.6f\\n\",s}'; "
      "awk \"$S\" & awk \"$S\"; wait",            r"109571\.690503\n109571\.690503"),
 ]
