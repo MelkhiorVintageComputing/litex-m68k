@@ -4,3 +4,6 @@
 # (Inputs/RD68031/Inputs/sw/MANIFEST).
 b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba  linux-7.2.9.tar.xz  https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz
 34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2  busybox-1.38.0.tar.bz2  https://busybox.net/downloads/busybox-1.38.0.tar.bz2
+# Buildroot (L8, buildroot/build.sh): the hash its release signs
+# (buildroot-2026.08.tar.xz.sign, by Peter Korsgaard's key).
+87aaca4164ea9d5c8085854953018263f7963f07c22e73a2a2185cc98c581c34  buildroot-2026.08.tar.xz  https://buildroot.org/downloads/buildroot-2026.08.tar.xz

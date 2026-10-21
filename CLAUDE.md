@@ -3,7 +3,7 @@
 m68k CPUs in the LiteX SoC builder: soft-cores in the FPGA first (RD68031, an
 MC68030, and optionally its RD68884 FPU), real hard CPUs on FPGA pins later, with the
 LiteX BIOS and bare-metal code as the first goal and buildroot Linux after it. The
-milestones (L0-L6) and the design decisions are in `doc/plan.md`.
+milestones (L0-L9) and the design decisions are in `doc/plan.md`.
 
 ## Hard rules
 
@@ -40,7 +40,7 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 
 | Path | What |
 |---|---|
-| `doc/plan.md` | the plan: milestones L0-L6 and why |
+| `doc/plan.md` | the plan: milestones L0-L9 and why |
 | `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), and the Motorola and board documentation (add-only) |
 | `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, L1-L5's bridge (`RD68031.bus_bridge = "sync"`) |
 | `litex_68k/m68030_fifo.py` | L6: the FIFO bridge, the default: the CPU on any clock, burst line fills, main RAM on a 128-bit LiteDRAM port (`doc/l6-fifo-bridge.md`) |
@@ -51,8 +51,9 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | `targets/qmtech_wukong.py` | L5/L6: the Wukong V3 board, DDR3 (CPU 30 MHz on its own MMCM, SoC 100 MHz) or block RAM, `--bus-bridge fifo` (default) or `sync` (CPU 25 MHz), `--cpu-variant standard+fpu` for RD68884 (`doc/l6-fpu.md`), `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
 | `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`); the tests take `--cpu-clk-freq` and `--sdram` (DDR3, 128-bit native port) |
 | `linux/` | L7: Linux 7.2.9 and a BusyBox initramfs (`fetch.sh`, `build.sh` into `build/linux`; the kernel tree is `~/LITEX-68K/src/linux-7.2.9`, made from the tarball and `patches/linux`); `doc/l7-linux.md` |
+| `buildroot/` | L8: the br2-external tree (`LITEX68K`), `litex_rd68031_fpu_defconfig`: buildroot 2026.08's glibc toolchain, hard float, the kernel from `patches/linux`, a cpio initramfs; `build.sh` into `~/LITEX-68K/build/buildroot-fpu` (`doc/l8-buildroot.md`) |
 | `sw/litexboot/` | L7: the loader the BIOS boots with the images: vmlinux's segments, the bootinfo, the jump; `images.py` lays the images out (`images.json` for `litex_term --images` and litex_sim `--ram-init`) |
-| `sim/litex/l7_test.py` | L7: Linux to a shell and a command set, in litex_sim or on a board (`--serial`) |
+| `sim/litex/l7_test.py` | L7: Linux to a shell and a command set, in litex_sim or on a board (`--serial`); L8: `--login` for buildroot's getty |
 | `sim/litex/fpswitch/` | two FPU tasks switched by timer0, the FPU saved as Linux does (`fpswitch_test.py`); the reduction of L7's FSAVE freeze |
 | `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented: `linux/` (the m68k LiteX machine), `RD68884/` (FSAVE in its microcode) |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |

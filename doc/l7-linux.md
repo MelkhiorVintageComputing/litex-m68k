@@ -6,7 +6,7 @@ unchanged; the kernel gets a new m68k machine for it.
 ```sh
 linux/build.sh                                   # kernel, BusyBox, initramfs -> build/linux
 sim/litex/fpswitch_test.py                       # FPU context switches, bare-metal, in litex_sim
-sim/litex/l7_test.py                             # in litex_sim (about 15 minutes)
+sim/litex/l7_test.py                             # in litex_sim (about 35 minutes)
 sim/litex/l7_test.py --serial /dev/ttyUSB0 --speed 1000000 \
     --build-dir build/qmtech_wukong_30m_fpu_1m   # on the Wukong, BIOS at its prompt
 ```

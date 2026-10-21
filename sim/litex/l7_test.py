@@ -8,6 +8,9 @@
     l7_test.py                          the simulation (litex_sim)
     l7_test.py --serial /dev/ttyUSB0 --build-dir build/qmtech_wukong_30m_fpu
                                         a board, its BIOS at the prompt
+    l7_test.py --login --linux-dir ~/LITEX-68K/build/buildroot-fpu/images
+                                        L8: buildroot's images, a getty to log in
+                                        on (doc/l8-buildroot.md)
 
 1. The kernel and initramfs are linux/build.sh's (--linux-dir). litexboot
    (sw/litexboot) is built against the SoC's software, and images.py places
@@ -55,6 +58,18 @@ COMMANDS = [
      "awk \"$S\" & awk \"$S\"; wait",            r"109571\.690503\n109571\.690503"),
 ]
 
+# --login (buildroot, doc/l8-buildroot.md): what only its userspace has. glibc
+# dynamically linked, and Lua's doubles through glibc's libm, which uses the
+# FPU's own transcendentals (the values are the host's).
+LOGIN_COMMANDS = [
+    ("grep ^NAME= /etc/os-release",            r'NAME=Buildroot'),
+    ("ls /lib/libc.so.6",                      r"^/lib/libc\.so\.6$"),
+    ("lua -e 'print(string.format(\"%.12f\", math.sin(1)+math.exp(1)+math.log(10)+math.atan(0.5)+math.sqrt(2)))'",
+                                               r"7\.740199077635"),
+    ("lua -e 's=0 for i=1,2000 do s=s+math.sin(i)*math.cos(i/3) end print(string.format(\"%.9f\", s))'",
+                                               r"1\.487327306"),
+]
+
 def run(cmd, cwd, log, what):
     with open(log, "w") as f:
         if subprocess.call(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=venv_env()):
@@ -86,6 +101,11 @@ def main():
         help="Instead of the command set: run CMD (repeatable), print its answer, stop "
              "at the first that does not come back within --try-timeout. For bring-up.")
     parser.add_argument("--try-timeout", default=120, type=float)
+    parser.add_argument("--login", action="store_true",
+        help="The userspace logs in on a getty (buildroot's) instead of linux/build.sh's "
+             "/init report and shell: log in as root, and add LOGIN_COMMANDS.")
+    parser.add_argument("--command-timeout", default=1800, type=float,
+        help="Seconds for each command of the set. In the simulation, the two awk take 850 s on L7's BusyBox, longer on buildroot's.")
     parser.add_argument("--boot-timeout", default=3600, type=float,
         help="Seconds from litexboot to the shell (the simulation takes tens of minutes).")
     args = parser.parse_args()
@@ -149,12 +169,19 @@ def main():
         check("FPU 68881" in got if "fpu" in args.variant else "FPU none" in got,
               "litexboot: wrong FPU for the {} variant".format(args.variant))
         t1 = time.time()
-        got = con.expect(r"litex: shell", args.boot_timeout)
-        print("\n[l7_test] litexboot to the shell: {:.0f} s".format(time.time() - t1), flush=True)
-        check("Run /init as init process" in got, "the kernel did not run /init")
-        check(re.search(r"liteuart.*timer0|timer0[\s\S]*liteuart|liteuart[\s\S]*timer0", got),
-              "/init: no liteuart and timer0 in /proc/interrupts")
-        con.expect(r"# ", 300)
+        if args.login:
+            got = con.expect(r"login: ", args.boot_timeout)
+            print("\n[l7_test] litexboot to the login: {:.0f} s".format(time.time() - t1), flush=True)
+            check("Run /init as init process" in got, "the kernel did not run /init")
+            con.type("root")
+            con.expect(r"# ", 300)
+        else:
+            got = con.expect(r"litex: shell", args.boot_timeout)
+            print("\n[l7_test] litexboot to the shell: {:.0f} s".format(time.time() - t1), flush=True)
+            check("Run /init as init process" in got, "the kernel did not run /init")
+            check(re.search(r"liteuart.*timer0|timer0[\s\S]*liteuart|liteuart[\s\S]*timer0", got),
+                  "/init: no liteuart and timer0 in /proc/interrupts")
+            con.expect(r"# ", 300)
         # The prompt at the start of a line: the echoed PS1= line has it too.
         con.type("PS1='{}'".format(SHELL_PROMPT))
         con.expect(r"\n" + re.escape(SHELL_PROMPT), 300)
@@ -171,8 +198,10 @@ def main():
 
         # 4. The command set.
         before = interrupts(con)
-        for cmd, want in COMMANDS:
-            ans = con.command(cmd, timeout=900, until=SHELL_PROMPT)
+        for cmd, want in COMMANDS + (LOGIN_COMMANDS if args.login else []):
+            t = time.time()
+            ans = con.command(cmd, timeout=args.command_timeout, until=SHELL_PROMPT)
+            print("\n[l7_test] {:.0f} s".format(time.time() - t), flush=True)
             check(re.search(want, ans.replace(SHELL_PROMPT, ""), re.M),
                   "{!r} answered {!r}, expected {!r}".format(cmd, ans, want))
         after = interrupts(con)

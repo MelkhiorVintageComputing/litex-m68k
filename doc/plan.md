@@ -167,7 +167,7 @@ command set, modelled on RD68031's rd-virt. Two FPU processes preempting each ot
 froze the machine: an FSAVE that RD68884's microcode never answered
 (`patches/RD68884`, reduced to `sim/litex/fpswitch`).
 
-**L8 — buildroot.** A br2-external tree (`buildroot/`), buildroot's internal glibc
+**L8 — buildroot.** *Done, in litex_sim and on the Wukong: `doc/l8-buildroot.md`.* A br2-external tree (`buildroot/`), buildroot's internal glibc
 toolchain for the 68030 with hard float, the kernel from `patches/linux`, a cpio
 initramfs; `litex_rd68031_fpu_defconfig`. Gate: boots to a login on the Wukong, and
 `l7_test.py` passes against it.
