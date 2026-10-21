@@ -1,0 +1,793 @@
+From ad1078c09a7be3570d2ca98d7c3cc65c68604687 Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Tue, 20 Oct 2026 22:53:57 +0200
+Subject: [PATCH] m68k: add the LiteX machine
+
+A 68030-class CPU in a SoC built with LiteX
+(https://github.com/enjoy-digital/litex), for instance RD68031, an
+MC68030 soft core, and its RD68884 FPU, on an FPGA.
+
+The SoC builder places its cores; the boot loader, built against the
+SoC's generated headers, passes where they are as bootinfo records
+(bootinfo-litex.h): no address is built into the kernel.
+
+- The CPU's interrupt controller: every SoC interrupt line on one
+  autovectored level, read from a pending and a mask CSR; a chained
+  handler gives line n IRQ_USER + n.
+- LiteX's Timer as the clock event device (one-shot and periodic), its
+  64-bit uptime counter as the clock source.
+- LiteUART as a platform device, and its earlycon.
+- The CSR window (0xf0000000 up, above KMAP) mapped through TT1,
+  uncached, as virt does for 0xff000000; ioremap() returns addresses
+  there unchanged.
+- Reset through the SoC controller.
+
+The machine selects OF without using a device tree, so that
+SERIAL_LITEUART (which depends on OF) can be built; it is probed as a
+plain platform device.
+
+Signed-off-by: Romain Dolbeau <romain@dolbeau.org>
+---
+ arch/m68k/Kbuild                            |   1 +
+ arch/m68k/Kconfig.machine                   |  17 +++
+ arch/m68k/include/asm/config.h              |   2 +
+ arch/m68k/include/asm/irq.h                 |   3 +-
+ arch/m68k/include/asm/litex.h               |  42 ++++++++
+ arch/m68k/include/asm/setup.h               |  36 +++++--
+ arch/m68k/include/uapi/asm/bootinfo-litex.h |  24 +++++
+ arch/m68k/include/uapi/asm/bootinfo.h       |   1 +
+ arch/m68k/kernel/head.S                     |  11 ++
+ arch/m68k/kernel/setup_mm.c                 |   7 ++
+ arch/m68k/litex/Makefile                    |   6 ++
+ arch/m68k/litex/config.c                    |  90 ++++++++++++++++
+ arch/m68k/litex/ints.c                      |  84 +++++++++++++++
+ arch/m68k/litex/platform.c                  |  32 ++++++
+ arch/m68k/litex/timer.c                     | 112 ++++++++++++++++++++
+ arch/m68k/mm/kmap.c                         |  11 ++
+ 16 files changed, 467 insertions(+), 12 deletions(-)
+ create mode 100644 arch/m68k/include/asm/litex.h
+ create mode 100644 arch/m68k/include/uapi/asm/bootinfo-litex.h
+ create mode 100644 arch/m68k/litex/Makefile
+ create mode 100644 arch/m68k/litex/config.c
+ create mode 100644 arch/m68k/litex/ints.c
+ create mode 100644 arch/m68k/litex/platform.c
+ create mode 100644 arch/m68k/litex/timer.c
+
+diff --git a/arch/m68k/Kbuild b/arch/m68k/Kbuild
+index 7762af9f6..b81792120 100644
+--- a/arch/m68k/Kbuild
++++ b/arch/m68k/Kbuild
+@@ -18,3 +18,4 @@ obj-$(CONFIG_M68KFPU_EMU)	+= math-emu/
+ obj-$(CONFIG_M68000)		+= 68000/
+ obj-$(CONFIG_COLDFIRE)		+= coldfire/
+ obj-$(CONFIG_VIRT)		+= virt/
++obj-$(CONFIG_M68K_LITEX)	+= litex/
+diff --git a/arch/m68k/Kconfig.machine b/arch/m68k/Kconfig.machine
+index cff990c31..41191de6e 100644
+--- a/arch/m68k/Kconfig.machine
++++ b/arch/m68k/Kconfig.machine
+@@ -144,6 +144,23 @@ config VIRT
+ 	  This options enable a pure virtual machine based on m68k,
+ 	  VIRTIO MMIO devices and GOLDFISH interfaces (TTY, RTC, PIC).
+ 
++config M68K_LITEX
++	bool "LiteX SoC support"
++	depends on MMU
++	select GENERIC_CLOCKEVENTS
++	select LITEX
++	select OF
++	select TTY
++	help
++	  A Motorola 68030-class CPU in a SoC built with LiteX
++	  (https://github.com/enjoy-digital/litex): for instance RD68031, an
++	  MC68030 soft core, on an FPGA. The SoC's cores (LiteUART, Timer0,
++	  the SoC controller) and the CPU's interrupt controller are found
++	  through bootinfo records, not a device tree; the boot loader writes
++	  them from the SoC's generated headers. OF is selected only so that
++	  the LiteX drivers (SERIAL_LITEUART) can be built; they are probed as
++	  plain platform devices. Select your CPU below.
++
+ config PILOT
+ 	bool
+ 
+diff --git a/arch/m68k/include/asm/config.h b/arch/m68k/include/asm/config.h
+index 9bb888ab5..1c7aebd7d 100644
+--- a/arch/m68k/include/asm/config.h
++++ b/arch/m68k/include/asm/config.h
+@@ -18,6 +18,7 @@ extern int mvme147_parse_bootinfo(const struct bi_record *record);
+ extern int mvme16x_parse_bootinfo(const struct bi_record *record);
+ extern int q40_parse_bootinfo(const struct bi_record *record);
+ extern int virt_parse_bootinfo(const struct bi_record *record);
++extern int litex_parse_bootinfo(const struct bi_record *record);
+ 
+ extern void config_amiga(void);
+ extern void config_apollo(void);
+@@ -31,5 +32,6 @@ extern void config_q40(void);
+ extern void config_sun3(void);
+ extern void config_sun3x(void);
+ extern void config_virt(void);
++extern void config_litex(void);
+ 
+ #endif /* _M68K_CONFIG_H */
+diff --git a/arch/m68k/include/asm/irq.h b/arch/m68k/include/asm/irq.h
+index 2263e92d4..cea27d305 100644
+--- a/arch/m68k/include/asm/irq.h
++++ b/arch/m68k/include/asm/irq.h
+@@ -16,7 +16,8 @@
+ #if defined(CONFIG_COLDFIRE)
+ #define NR_IRQS 256
+ #elif defined(CONFIG_VME) || defined(CONFIG_SUN3) || \
+-      defined(CONFIG_SUN3X) || defined(CONFIG_VIRT)
++      defined(CONFIG_SUN3X) || defined(CONFIG_VIRT) || \
++      defined(CONFIG_M68K_LITEX)
+ #define NR_IRQS 200
+ #elif defined(CONFIG_ATARI)
+ #define NR_IRQS 141
+diff --git a/arch/m68k/include/asm/litex.h b/arch/m68k/include/asm/litex.h
+new file mode 100644
+index 000000000..586d7fa85
+--- /dev/null
++++ b/arch/m68k/include/asm/litex.h
+@@ -0,0 +1,42 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __ASM_M68K_LITEX_H
++#define __ASM_M68K_LITEX_H
++
++/*
++ * The SoC's CSRs are mapped transparently (TT1, head.S), uncached, from
++ * LITEX_TT_BASE to the end of the address space, above the kernel's KMAP
++ * window (KMAP_END, 0xf0000000 on 030/040): ioremap() of an address there
++ * returns it unchanged. The boot loader's addresses for the cores must be
++ * there.
++ */
++#define LITEX_TT_BASE	0xf0000000
++#define LITEX_TT_SIZE	0x10000000
++
++#ifndef __ASSEMBLER__
++
++#include <asm/irq.h>
++
++/* The SoC's interrupt lines, bit n of the CPU's pending/mask CSRs. */
++#define LITEX_IRQ_BASE		IRQ_USER
++#define LITEX_NR_IRQS		32
++
++struct litex_booter_device {
++	u32 base;
++	u32 irq;	/* a line, or the IPL for the interrupt controller */
++};
++
++struct litex_booter_data {
++	u32 sys_clk;
++	struct litex_booter_device irqctrl;
++	struct litex_booter_device ctrl;
++	struct litex_booter_device uart;
++	struct litex_booter_device timer0;
++};
++
++extern struct litex_booter_data litex_bi_data;
++
++extern void __init litex_init_IRQ(void);
++extern void __init litex_sched_init(void);
++
++#endif /* !__ASSEMBLER__ */
++#endif /* __ASM_M68K_LITEX_H */
+diff --git a/arch/m68k/include/asm/setup.h b/arch/m68k/include/asm/setup.h
+index e4ec169f5..b3e1d5f1a 100644
+--- a/arch/m68k/include/asm/setup.h
++++ b/arch/m68k/include/asm/setup.h
+@@ -38,7 +38,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_MVME16x) || defined(CONFIG_BVME6000)               \
+ 	|| defined(CONFIG_HP300) || defined(CONFIG_Q40)                      \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147)                  \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_AMIGA (m68k_machtype == MACH_AMIGA)
+ #else
+ #  define MACH_AMIGA_ONLY
+@@ -52,7 +52,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_MVME16x) || defined(CONFIG_BVME6000)               \
+ 	|| defined(CONFIG_HP300) || defined(CONFIG_Q40)                      \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147)                  \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_ATARI (m68k_machtype == MACH_ATARI)
+ #else
+ #  define MACH_ATARI_ONLY
+@@ -66,7 +66,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_MVME16x) || defined(CONFIG_BVME6000)                 \
+ 	|| defined(CONFIG_HP300) || defined(CONFIG_Q40)                        \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147)                    \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_MAC (m68k_machtype == MACH_MAC)
+ #else
+ #  define MACH_MAC_ONLY
+@@ -88,7 +88,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_MVME16x) || defined(CONFIG_BVME6000)              \
+ 	|| defined(CONFIG_HP300) || defined(CONFIG_Q40)                     \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147)                 \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_APOLLO (m68k_machtype == MACH_APOLLO)
+ #else
+ #  define MACH_APOLLO_ONLY
+@@ -102,7 +102,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_APOLLO) || defined(CONFIG_BVME6000)               \
+ 	|| defined(CONFIG_HP300) || defined(CONFIG_Q40)                     \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME16x)                 \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_MVME147 (m68k_machtype == MACH_MVME147)
+ #else
+ #  define MACH_MVME147_ONLY
+@@ -116,7 +116,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_APOLLO) || defined(CONFIG_BVME6000)               \
+ 	|| defined(CONFIG_HP300) || defined(CONFIG_Q40)                     \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147)                 \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_MVME16x (m68k_machtype == MACH_MVME16x)
+ #else
+ #  define MACH_MVME16x_ONLY
+@@ -130,7 +130,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_APOLLO) || defined(CONFIG_MVME16x)                \
+ 	|| defined(CONFIG_HP300) || defined(CONFIG_Q40)                     \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147)                 \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_BVME6000 (m68k_machtype == MACH_BVME6000)
+ #else
+ #  define MACH_BVME6000_ONLY
+@@ -144,7 +144,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_APOLLO) || defined(CONFIG_MVME16x) \
+ 	|| defined(CONFIG_BVME6000) || defined(CONFIG_Q40) \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147) \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_HP300 (m68k_machtype == MACH_HP300)
+ #else
+ #  define MACH_HP300_ONLY
+@@ -158,7 +158,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_APOLLO) || defined(CONFIG_MVME16x)                \
+ 	|| defined(CONFIG_BVME6000) || defined(CONFIG_HP300)                \
+ 	|| defined(CONFIG_SUN3X) || defined(CONFIG_MVME147)                 \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_Q40 (m68k_machtype == MACH_Q40)
+ #else
+ #  define MACH_Q40_ONLY
+@@ -172,7 +172,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_APOLLO) || defined(CONFIG_MVME16x)                \
+ 	|| defined(CONFIG_BVME6000) || defined(CONFIG_HP300)                \
+ 	|| defined(CONFIG_Q40) || defined(CONFIG_MVME147)                   \
+-	|| defined(CONFIG_VIRT)
++	|| defined(CONFIG_VIRT) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_SUN3X (m68k_machtype == MACH_SUN3X)
+ #else
+ #  define CONFIG_SUN3X_ONLY
+@@ -186,7 +186,7 @@ extern unsigned long m68k_machtype;
+ 	|| defined(CONFIG_APOLLO) || defined(CONFIG_MVME16x)                \
+ 	|| defined(CONFIG_BVME6000) || defined(CONFIG_HP300)                \
+ 	|| defined(CONFIG_Q40) || defined(CONFIG_SUN3X)                     \
+-	|| defined(CONFIG_MVME147)
++	|| defined(CONFIG_MVME147) || defined(CONFIG_M68K_LITEX)
+ #  define MACH_IS_VIRT (m68k_machtype == MACH_VIRT)
+ #else
+ #  define MACH_VIRT_ONLY
+@@ -194,6 +194,20 @@ extern unsigned long m68k_machtype;
+ #  define MACH_TYPE (MACH_VIRT)
+ #endif
+ 
++#if !defined(CONFIG_M68K_LITEX)
++#  define MACH_IS_LITEX (0)
++#elif defined(CONFIG_AMIGA) || defined(CONFIG_MAC) || defined(CONFIG_ATARI) \
++	|| defined(CONFIG_APOLLO) || defined(CONFIG_MVME16x)                \
++	|| defined(CONFIG_BVME6000) || defined(CONFIG_HP300)                \
++	|| defined(CONFIG_Q40) || defined(CONFIG_SUN3X)                     \
++	|| defined(CONFIG_MVME147) || defined(CONFIG_VIRT)
++#  define MACH_IS_LITEX (m68k_machtype == MACH_LITEX)
++#else
++#  define MACH_LITEX_ONLY
++#  define MACH_IS_LITEX (1)
++#  define MACH_TYPE (MACH_LITEX)
++#endif
++
+ #ifndef MACH_TYPE
+ #  define MACH_TYPE (m68k_machtype)
+ #endif
+diff --git a/arch/m68k/include/uapi/asm/bootinfo-litex.h b/arch/m68k/include/uapi/asm/bootinfo-litex.h
+new file mode 100644
+index 000000000..d065b16f2
+--- /dev/null
++++ b/arch/m68k/include/uapi/asm/bootinfo-litex.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++/*
++ * asm/bootinfo-litex.h -- LiteX SoC specific boot information definitions
++ *
++ * A LiteX SoC's cores sit where the SoC builder put them: the boot loader,
++ * built against the SoC's generated headers, says where. Records with a
++ * "line" give the core's interrupt line, its bit in the CPU's interrupt
++ * controller.
++ */
++
++#ifndef _UAPI_ASM_M68K_BOOTINFO_LITEX_H
++#define _UAPI_ASM_M68K_BOOTINFO_LITEX_H
++
++#define BI_LITEX_SYS_CLK	0x8000	/* __be32 sys clock, Hz */
++#define BI_LITEX_IRQCTRL	0x8001	/* __be32 base, __be32 IPL: the CPU's
++					   pending (+0) and mask (+4) CSRs,
++					   every line on one autovectored
++					   level */
++#define BI_LITEX_CTRL		0x8002	/* __be32 base, 0: the SoC controller */
++#define BI_LITEX_UART		0x8003	/* __be32 base, __be32 line: LiteUART */
++#define BI_LITEX_TIMER0		0x8004	/* __be32 base, __be32 line: Timer, with
++					   its uptime counter */
++
++#endif /* _UAPI_ASM_M68K_BOOTINFO_LITEX_H */
+diff --git a/arch/m68k/include/uapi/asm/bootinfo.h b/arch/m68k/include/uapi/asm/bootinfo.h
+index 28d2d44c0..9412711de 100644
+--- a/arch/m68k/include/uapi/asm/bootinfo.h
++++ b/arch/m68k/include/uapi/asm/bootinfo.h
+@@ -91,6 +91,7 @@ struct mem_info {
+ #define MACH_M54XX		12
+ #define MACH_M5441X		13
+ #define MACH_VIRT		14
++#define MACH_LITEX		15
+ 
+ 
+     /*
+diff --git a/arch/m68k/kernel/head.S b/arch/m68k/kernel/head.S
+index 502eeae49..c267ac081 100644
+--- a/arch/m68k/kernel/head.S
++++ b/arch/m68k/kernel/head.S
+@@ -259,6 +259,7 @@
+ #include <asm/bootinfo-mac.h>
+ #include <asm/bootinfo-q40.h>
+ #include <asm/bootinfo-virt.h>
++#include <asm/litex.h>
+ #include <asm/bootinfo-vme.h>
+ #include <asm/setup.h>
+ #include <asm/entry.h>
+@@ -532,6 +533,7 @@ func_define	putn,1
+ #define is_not_q40(lab) cmpl &MACH_Q40,%pc@(m68k_machtype); jne lab
+ #define is_not_sun3x(lab) cmpl &MACH_SUN3X,%pc@(m68k_machtype); jne lab
+ #define is_not_virt(lab) cmpl &MACH_VIRT,%pc@(m68k_machtype); jne lab
++#define is_not_litex(lab) cmpl &MACH_LITEX,%pc@(m68k_machtype); jne lab
+ 
+ #define hasnt_leds(lab) cmpl &MACH_HP300,%pc@(m68k_machtype); \
+ 			jeq 42f; \
+@@ -1250,6 +1252,15 @@ L(notsun3x):
+ L(novirt):
+ #endif
+ 
++#ifdef CONFIG_M68K_LITEX
++	/* The SoC's CSRs (LITEX_TT_BASE up), at their physical addresses,
++	 * uncached, supervisor only. */
++	is_not_litex(L(nolitex))
++	mmu_map_tt	#1,#LITEX_TT_BASE,#LITEX_TT_SIZE,#_PAGE_NOCACHE_S
++	jbra    L(mmu_init_done)
++L(nolitex):
++#endif
++
+ #ifdef CONFIG_APOLLO
+ 	is_not_apollo(L(notapollo))
+ 
+diff --git a/arch/m68k/kernel/setup_mm.c b/arch/m68k/kernel/setup_mm.c
+index c7e8de0d3..d2b6c9571 100644
+--- a/arch/m68k/kernel/setup_mm.c
++++ b/arch/m68k/kernel/setup_mm.c
+@@ -182,6 +182,8 @@ static void __init m68k_parse_bootinfo(const struct bi_record *record)
+ 				unknown = apollo_parse_bootinfo(record);
+ 			else if (MACH_IS_VIRT)
+ 				unknown = virt_parse_bootinfo(record);
++			else if (MACH_IS_LITEX)
++				unknown = litex_parse_bootinfo(record);
+ 			else
+ 				unknown = 1;
+ 		}
+@@ -322,6 +324,11 @@ void __init setup_arch(char **cmdline_p)
+ 	case MACH_VIRT:
+ 		config_virt();
+ 		break;
++#endif
++#ifdef CONFIG_M68K_LITEX
++	case MACH_LITEX:
++		config_litex();
++		break;
+ #endif
+ 	default:
+ 		panic("No configuration setup");
+diff --git a/arch/m68k/litex/Makefile b/arch/m68k/litex/Makefile
+new file mode 100644
+index 000000000..830047479
+--- /dev/null
++++ b/arch/m68k/litex/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Makefile for Linux arch/m68k/litex source directory
++#
++
++obj-y		:= config.o ints.o timer.o platform.o
+diff --git a/arch/m68k/litex/config.c b/arch/m68k/litex/config.c
+new file mode 100644
+index 000000000..43645c2d1
+--- /dev/null
++++ b/arch/m68k/litex/config.c
+@@ -0,0 +1,90 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * A 68030-class CPU in a LiteX SoC (https://github.com/enjoy-digital/litex).
++ *
++ * The SoC builder places its cores; the boot loader, built against the SoC's
++ * generated headers, passes their addresses and interrupt lines as bootinfo
++ * records (asm/bootinfo-litex.h).
++ */
++
++#include <linux/kernel.h>
++#include <linux/litex.h>
++#include <linux/serial_core.h>
++
++#include <asm/bootinfo.h>
++#include <asm/bootinfo-litex.h>
++#include <asm/byteorder.h>
++#include <asm/config.h>
++#include <asm/litex.h>
++#include <asm/machdep.h>
++
++/* The SoC controller's registers. */
++#define LITEX_CTRL_RESET	0x00	/* bit 0: reset the SoC */
++
++struct litex_booter_data litex_bi_data;
++
++static void litex_get_model(char *str)
++{
++	/* str is 80 characters long */
++	sprintf(str, "LiteX SoC (%u MHz)", litex_bi_data.sys_clk / 1000000);
++}
++
++static void litex_reset(void)
++{
++	local_irq_disable();
++	if (litex_bi_data.ctrl.base)
++		litex_write32((void __iomem *)litex_bi_data.ctrl.base + LITEX_CTRL_RESET, 1);
++	for (;;)
++		;
++}
++
++static void __init litex_device(struct litex_booter_device *dev, const __be32 *data)
++{
++	dev->base = be32_to_cpu(data[0]);
++	dev->irq  = be32_to_cpu(data[1]);
++}
++
++/*
++ * Parse a LiteX-specific record in the bootinfo
++ */
++int __init litex_parse_bootinfo(const struct bi_record *record)
++{
++	const __be32 *data = (const __be32 *)record->data;
++
++	switch (be16_to_cpu(record->tag)) {
++	case BI_LITEX_SYS_CLK:
++		litex_bi_data.sys_clk = be32_to_cpu(data[0]);
++		break;
++	case BI_LITEX_IRQCTRL:
++		litex_device(&litex_bi_data.irqctrl, data);
++		break;
++	case BI_LITEX_CTRL:
++		litex_device(&litex_bi_data.ctrl, data);
++		break;
++	case BI_LITEX_UART:
++		litex_device(&litex_bi_data.uart, data);
++		break;
++	case BI_LITEX_TIMER0:
++		litex_device(&litex_bi_data.timer0, data);
++		break;
++	default:
++		return 1;
++	}
++	return 0;
++}
++
++void __init config_litex(void)
++{
++	char earlycon[24];
++
++	if (litex_bi_data.uart.base) {
++		snprintf(earlycon, sizeof(earlycon), "liteuart,0x%08x",
++			 litex_bi_data.uart.base);
++		setup_earlycon(earlycon);
++	}
++
++	mach_init_IRQ = litex_init_IRQ;
++	mach_sched_init = litex_sched_init;
++	mach_get_model = litex_get_model;
++	mach_reset = litex_reset;
++}
+diff --git a/arch/m68k/litex/ints.c b/arch/m68k/litex/ints.c
+new file mode 100644
+index 000000000..204f57215
+--- /dev/null
++++ b/arch/m68k/litex/ints.c
+@@ -0,0 +1,84 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * The CPU's interrupt controller in a LiteX SoC: every interrupt line of the
++ * SoC on one autovectored level (BI_LITEX_IRQCTRL's IPL), and two CSRs, the
++ * lines as they are (pending) and the lines allowed to interrupt (mask).
++ * Line n is Linux interrupt LITEX_IRQ_BASE + n. The lines are levels: a core
++ * keeps its line up until its driver acknowledges it.
++ */
++
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/kernel.h>
++#include <linux/litex.h>
++#include <linux/spinlock.h>
++
++#include <asm/irq.h>
++#include <asm/litex.h>
++
++#define LITEX_IRQ_PENDING	0x00
++#define LITEX_IRQ_MASK		0x04
++
++static void __iomem *litex_irq_base;
++static u32 litex_irq_mask;
++static DEFINE_RAW_SPINLOCK(litex_irq_lock);
++
++static void litex_irq_update(u32 set, u32 clear)
++{
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&litex_irq_lock, flags);
++	litex_irq_mask = (litex_irq_mask | set) & ~clear;
++	litex_write32(litex_irq_base + LITEX_IRQ_MASK, litex_irq_mask);
++	raw_spin_unlock_irqrestore(&litex_irq_lock, flags);
++}
++
++static void litex_irq_enable(struct irq_data *data)
++{
++	litex_irq_update(BIT(data->irq - LITEX_IRQ_BASE), 0);
++}
++
++static void litex_irq_disable(struct irq_data *data)
++{
++	litex_irq_update(0, BIT(data->irq - LITEX_IRQ_BASE));
++}
++
++static unsigned int litex_irq_startup(struct irq_data *data)
++{
++	litex_irq_enable(data);
++	return 0;
++}
++
++static struct irq_chip litex_irq_chip = {
++	.name		= "litex",
++	.irq_enable	= litex_irq_enable,
++	.irq_disable	= litex_irq_disable,
++	.irq_startup	= litex_irq_startup,
++	.irq_shutdown	= litex_irq_disable,
++};
++
++static void litex_irq_demux(struct irq_desc *desc)
++{
++	u32 pending = litex_read32(litex_irq_base + LITEX_IRQ_PENDING) &
++		      litex_irq_mask;
++
++	while (pending) {
++		unsigned int line = __ffs(pending);
++
++		generic_handle_irq(LITEX_IRQ_BASE + line);
++		pending &= pending - 1;
++	}
++}
++
++void __init litex_init_IRQ(void)
++{
++	litex_irq_base = (void __iomem *)litex_bi_data.irqctrl.base;
++	litex_irq_mask = 0;
++	litex_write32(litex_irq_base + LITEX_IRQ_MASK, 0);
++
++	m68k_setup_irq_controller(&litex_irq_chip, handle_simple_irq,
++				  LITEX_IRQ_BASE, LITEX_NR_IRQS);
++
++	/* IRQ_AUTO_n is n: the autovectored level of the controller. */
++	irq_set_chained_handler(litex_bi_data.irqctrl.irq, litex_irq_demux);
++}
+diff --git a/arch/m68k/litex/platform.c b/arch/m68k/litex/platform.c
+new file mode 100644
+index 000000000..506b46c0f
+--- /dev/null
++++ b/arch/m68k/litex/platform.c
+@@ -0,0 +1,32 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * The LiteX cores Linux has a driver for, as platform devices: LiteUART.
++ */
++
++#include <linux/init.h>
++#include <linux/ioport.h>
++#include <linux/platform_device.h>
++
++#include <asm/litex.h>
++#include <asm/setup.h>
++
++#define LITEX_UART_SIZE	0x20
++
++static int __init litex_platform_init(void)
++{
++	struct resource res[2];
++	struct platform_device *pdev;
++
++	if (!MACH_IS_LITEX || !litex_bi_data.uart.base)
++		return -ENODEV;
++
++	res[0] = (struct resource)DEFINE_RES_MEM(litex_bi_data.uart.base,
++						  LITEX_UART_SIZE);
++	res[1] = (struct resource)DEFINE_RES_IRQ(LITEX_IRQ_BASE +
++						  litex_bi_data.uart.irq);
++	pdev = platform_device_register_simple("liteuart", PLATFORM_DEVID_NONE,
++					       res, ARRAY_SIZE(res));
++	return PTR_ERR_OR_ZERO(pdev);
++}
++
++device_initcall(litex_platform_init);
+diff --git a/arch/m68k/litex/timer.c b/arch/m68k/litex/timer.c
+new file mode 100644
+index 000000000..783dc974a
+--- /dev/null
++++ b/arch/m68k/litex/timer.c
+@@ -0,0 +1,112 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * LiteX's Timer core as the clock event device, and its uptime counter (a
++ * 64-bit count of sys clock cycles, the SoC's --timer-uptime) as the clock
++ * source.
++ *
++ * The Timer counts down from `load` once enabled, and at 0 takes `reload`
++ * (0: it stays at 0); its "zero" event is the edge into 0. One-shot: load =
++ * delta, reload = 0. Periodic: load = reload = period - 1.
++ */
++
++#include <linux/clockchips.h>
++#include <linux/clocksource.h>
++#include <linux/interrupt.h>
++#include <linux/kernel.h>
++#include <linux/litex.h>
++
++#include <asm/litex.h>
++
++#define TIMER_LOAD		0x00
++#define TIMER_RELOAD		0x04
++#define TIMER_EN		0x08
++#define TIMER_EV_PENDING	0x18
++#define TIMER_EV_ENABLE		0x1c
++#define TIMER_UPTIME_LATCH	0x20
++#define TIMER_UPTIME_CYCLES	0x24	/* 64 bits: two CSRs, high first */
++
++static void __iomem *timer_base;
++
++static void litex_timer_start(u32 load, u32 reload)
++{
++	litex_write32(timer_base + TIMER_EN, 0);
++	litex_write32(timer_base + TIMER_LOAD, load);
++	litex_write32(timer_base + TIMER_RELOAD, reload);
++	litex_write32(timer_base + TIMER_EV_PENDING, 1);
++	litex_write32(timer_base + TIMER_EN, 1);
++}
++
++static int litex_timer_next_event(unsigned long delta,
++				  struct clock_event_device *evt)
++{
++	litex_timer_start(delta, 0);
++	return 0;
++}
++
++static int litex_timer_periodic(struct clock_event_device *evt)
++{
++	u32 period = DIV_ROUND_CLOSEST(litex_bi_data.sys_clk, HZ) - 1;
++
++	litex_timer_start(period, period);
++	return 0;
++}
++
++static int litex_timer_shutdown(struct clock_event_device *evt)
++{
++	litex_write32(timer_base + TIMER_EN, 0);
++	return 0;
++}
++
++static struct clock_event_device litex_clockevent = {
++	.name			= "litex_timer0",
++	.features		= CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT,
++	.rating			= 300,
++	.set_next_event		= litex_timer_next_event,
++	.set_state_periodic	= litex_timer_periodic,
++	.set_state_oneshot	= litex_timer_shutdown,
++	.set_state_shutdown	= litex_timer_shutdown,
++	.tick_resume		= litex_timer_shutdown,
++};
++
++static irqreturn_t litex_timer_interrupt(int irq, void *dev_id)
++{
++	struct clock_event_device *evt = dev_id;
++
++	litex_write32(timer_base + TIMER_EV_PENDING, 1);
++	evt->event_handler(evt);
++	return IRQ_HANDLED;
++}
++
++static u64 litex_uptime_read(struct clocksource *cs)
++{
++	litex_write32(timer_base + TIMER_UPTIME_LATCH, 1);
++	return litex_read64(timer_base + TIMER_UPTIME_CYCLES);
++}
++
++static struct clocksource litex_clocksource = {
++	.name	= "litex_uptime",
++	.rating	= 300,
++	.read	= litex_uptime_read,
++	.mask	= CLOCKSOURCE_MASK(64),
++	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
++};
++
++void __init litex_sched_init(void)
++{
++	unsigned int irq = LITEX_IRQ_BASE + litex_bi_data.timer0.irq;
++
++	timer_base = (void __iomem *)litex_bi_data.timer0.base;
++	litex_write32(timer_base + TIMER_EN, 0);
++	litex_write32(timer_base + TIMER_EV_PENDING, 1);
++	litex_write32(timer_base + TIMER_EV_ENABLE, 1);
++
++	clocksource_register_hz(&litex_clocksource, litex_bi_data.sys_clk);
++
++	if (request_irq(irq, litex_timer_interrupt, IRQF_TIMER, "timer0",
++			&litex_clockevent))
++		pr_err("litex: cannot register the timer interrupt %u\n", irq);
++	litex_clockevent.cpumask = cpu_possible_mask;
++	litex_clockevent.irq = irq;
++	clockevents_config_and_register(&litex_clockevent,
++					litex_bi_data.sys_clk, 16, 0xffffffff);
++}
+diff --git a/arch/m68k/mm/kmap.c b/arch/m68k/mm/kmap.c
+index 616799940..c7a10099b 100644
+--- a/arch/m68k/mm/kmap.c
++++ b/arch/m68k/mm/kmap.c
+@@ -20,6 +20,7 @@
+ #include <asm/page.h>
+ #include <asm/io.h>
+ #include <asm/tlbflush.h>
++#include <asm/litex.h>
+ 
+ #undef DEBUG
+ 
+@@ -185,6 +186,12 @@ void __iomem *__ioremap(unsigned long physaddr, unsigned long size, int cachefla
+ 			return (void __iomem *)physaddr;
+ 	}
+ #endif
++#ifdef CONFIG_M68K_LITEX
++	if (MACH_IS_LITEX) {
++		if (physaddr >= LITEX_TT_BASE && cacheflag == IOMAP_NOCACHE_SER)
++			return (void __iomem *)physaddr;
++	}
++#endif
+ #ifdef CONFIG_COLDFIRE
+ 	if (__cf_internalio(physaddr))
+ 		return (void __iomem *) physaddr;
+@@ -308,6 +315,10 @@ void iounmap(void __iomem *addr)
+ 	if (MACH_IS_VIRT && (unsigned long)addr >= 0xff000000)
+ 		return;
+ #endif
++#ifdef CONFIG_M68K_LITEX
++	if (MACH_IS_LITEX && (unsigned long)addr >= LITEX_TT_BASE)
++		return;
++#endif
+ #ifdef CONFIG_COLDFIRE
+ 	if (cf_internalio(addr))
+ 		return;
+-- 
+2.47.3
+

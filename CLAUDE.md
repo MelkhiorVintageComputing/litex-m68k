@@ -50,9 +50,14 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | `sim/unit/` | migen unit tests of `core.py`'s bus crossing and time-out, two clocks, in migen's simulator: no Verilator build (`make -C sim/unit check`) |
 | `targets/qmtech_wukong.py` | L5/L6: the Wukong V3 board, DDR3 (CPU 30 MHz on its own MMCM, SoC 100 MHz) or block RAM, `--bus-bridge fifo` (default) or `sync` (CPU 25 MHz), `--cpu-variant standard+fpu` for RD68884 (`doc/l6-fpu.md`), `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md` |
 | `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`); the tests take `--cpu-clk-freq` and `--sdram` (DDR3, 128-bit native port) |
-| `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented |
+| `linux/` | L7: Linux 7.2.9 and a BusyBox initramfs (`fetch.sh`, `build.sh` into `build/linux`; the kernel tree is `~/LITEX-68K/src/linux-7.2.9`, made from the tarball and `patches/linux`); `doc/l7-linux.md` |
+| `sw/litexboot/` | L7: the loader the BIOS boots with the images: vmlinux's segments, the bootinfo, the jump; `images.py` lays the images out (`images.json` for `litex_term --images` and litex_sim `--ram-init`) |
+| `sim/litex/l7_test.py` | L7: Linux to a shell and a command set, in litex_sim or on a board (`--serial`) |
+| `sim/litex/fpswitch/` | two FPU tasks switched by timer0, the FPU saved as Linux does (`fpswitch_test.py`); the reduction of L7's FSAVE freeze |
+| `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented: `linux/` (the m68k LiteX machine), `RD68884/` (FSAVE in its microcode) |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
-| `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031`, and from `Inputs/RD68884` (the FPU) |
+| `scripts/patch_rd68884.sh` | makes `~/LITEX-68K/RD68884`, `Inputs/RD68884` with `patches/RD68884` and its microcode regenerated |
+| `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031`, and the FPU from the patched RD68884 (`scripts/patch_rd68884.sh`) |
 | `../pythondata-cpu-rd68031` | the RD68031 and RD68884 RTL snapshot LiteX builds from (`get_data_mod("cpu", "rd68031")`) |
 
 ## Environment

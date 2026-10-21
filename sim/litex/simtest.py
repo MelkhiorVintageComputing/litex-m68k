@@ -56,10 +56,10 @@ def sim_build_name(args, name):
     return name + ("-cpu" + str(args.cpu_clk_freq) if args.cpu_clk_freq else "") + \
         ("-sdram" if args.sdram else "")
 
-def sim_command(variant, build, port, extra=()):
+def sim_command(variant, build, port, extra=(), main_ram=0x10000):
     """targets/sim.py with the BIOS, the UART on TCP port `port`; main RAM in
-    block RAM unless `extra` has SDRAM."""
-    ram = [] if "--with-sdram" in extra else ["--integrated-main-ram-size", "0x10000"]
+    block RAM (`main_ram` bytes) unless `extra` has SDRAM."""
+    ram = [] if "--with-sdram" in extra else ["--integrated-main-ram-size", hex(main_ram)]
     return [sys.executable, os.path.join(TOP, "targets", "sim.py"),
         "--cpu-variant", variant,
         "--output-dir", build,

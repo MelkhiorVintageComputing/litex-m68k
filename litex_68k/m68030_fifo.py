@@ -86,7 +86,7 @@ class M68030ToFIFO(LiteXModule):
     nothing for a coprocessor in `coprocessors` (CpIDs: it is on the bus and
     answers), BERR for the rest (as M68030ToWishbone, see there).
     """
-    def __init__(self, bus, io_regions={}, coprocessors=()):
+    def __init__(self, bus, io_regions={}, coprocessors=(), coprocessor_timeout=1024):
         self.bus      = bus
         self.request  = request  = stream.Endpoint(request_layout())
         self.response = response = stream.Endpoint(response_layout())
@@ -258,9 +258,20 @@ class M68030ToFIFO(LiteXModule):
             ),
         )
         # A cycle another slave on the bus answers (a coprocessor's, UM 10.1).
+        # Should it never answer, a bus error after `coprocessor_timeout`
+        # clocks, as a board's bus watchdog would: the processor takes an
+        # exception instead of waiting on the cycle for ever, with nothing,
+        # not even an interrupt, able to get it out.
+        cp_count = Signal(max=coprocessor_timeout + 1)
         fsm.act("ELSEWHERE",
+            NextValue(cp_count, cp_count + 1),
             If(bus.as_n,
+                NextValue(cp_count, 0),
                 NextState("IDLE"),
+            ).Elif(cp_count == coprocessor_timeout - 1,
+                NextValue(cp_count, 0),
+                NextValue(berr_n, 0),
+                NextState("END"),
             ),
         )
         # STERM is one clock (UM 7.3.4: negated within two). AVEC and BERR are held

@@ -11,4 +11,6 @@ One subdirectory per project, named after it (`patches/litex/`, `patches/RD68031
 - `README.md`: the upstream commit the series applies to, and for each patch what it
   changes, why this project needs it, and its upstream status (not sent, sent, merged).
 
-There are no patches yet.
+- `linux/`: Linux 7.2.9, the m68k LiteX machine (L7, `doc/l7-linux.md`).
+- `RD68884/`: the FPU's microcode, FSAVE during the release of a
+  register-to-register instruction (L7, `doc/l7-linux.md`).

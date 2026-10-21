@@ -1,0 +1,20 @@
+#!/bin/sh
+# SPDX-License-Identifier: CERN-OHL-S-2.0
+# Copyright 2026 Romain Dolbeau
+# Adapted from RD68031's sim/virt/linux/init
+# (https://github.com/MelkhiorVintageComputing/RD68031): the first program of
+# the LiteX initramfs (linux/build.sh), then a shell on the console.
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+echo "=============================================="
+echo " LiteX-68K initramfs: hello from /init"
+echo "=============================================="
+uname -a
+cat /proc/cpuinfo
+cat /proc/interrupts
+free
+echo "sum test: $((6*7))"
+echo "awk float: $(awk 'BEGIN{printf "%.6f", atan2(1,1)*4}')"
+echo "litex: shell"
+exec /bin/sh

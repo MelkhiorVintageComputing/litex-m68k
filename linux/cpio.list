@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: CERN-OHL-S-2.0
+# Copyright 2026 Romain Dolbeau
+# Adapted from RD68031's sim/virt/linux/cpio.list
+# (https://github.com/MelkhiorVintageComputing/RD68031).
+# @BUSYBOX@ and @INIT@ are substituted by the build with paths under build/.
+dir /dev 0755 0 0
+nod /dev/console 0600 0 0 c 5 1
+dir /proc 0755 0 0
+dir /sys 0755 0 0
+dir /bin 0755 0 0
+dir /sbin 0755 0 0
+file /bin/busybox @BUSYBOX@ 0755 0 0
+slink /bin/sh busybox 0777 0 0
+file /init @INIT@ 0755 0 0
+slink /bin/mount busybox 0777 0 0
+slink /bin/echo busybox 0777 0 0
+slink /bin/uname busybox 0777 0 0
+slink /bin/cat busybox 0777 0 0
+slink /bin/free busybox 0777 0 0
+slink /bin/ls busybox 0777 0 0
+slink /bin/awk busybox 0777 0 0
+slink /bin/poweroff busybox 0777 0 0
+slink /bin/head busybox 0777 0 0
+slink /bin/grep busybox 0777 0 0
+slink /bin/wc busybox 0777 0 0
+slink /bin/sort busybox 0777 0 0
+slink /bin/sleep busybox 0777 0 0
+slink /bin/date busybox 0777 0 0
+slink /bin/ps busybox 0777 0 0
+slink /bin/dmesg busybox 0777 0 0
+slink /bin/md5sum busybox 0777 0 0
+slink /bin/seq busybox 0777 0 0
+slink /bin/cp busybox 0777 0 0
+slink /bin/rm busybox 0777 0 0
+slink /bin/mkdir busybox 0777 0 0
+slink /bin/touch busybox 0777 0 0
+slink /bin/dd busybox 0777 0 0
+slink /bin/expr busybox 0777 0 0
+slink /bin/tr busybox 0777 0 0
+slink /bin/sed busybox 0777 0 0

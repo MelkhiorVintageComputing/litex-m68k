@@ -157,11 +157,26 @@ are heavy jobs, run alone.
   and RD68884 as the `+fpu` variants (cputest's FPU checks; L3/L4 on the board).
   The FPU-less variants build with `-msoft-float`, on LiteX's compiler-rt.
 
+**L7 — Linux to a shell.** *Done, in litex_sim and on the Wukong: `doc/l7-linux.md`.* Linux 7.2.9 with a new m68k
+machine, `MACH_LITEX` (`patches/linux`): bootinfo records for the SoC's cores, the
+CPU's interrupt CSRs as a chained controller, timer0 as clock event and clock
+source, LiteUART as console. `sw/litexboot` loads vmlinux and an initramfs and
+writes the bootinfo. Images go by `litex_term --images` at 1 Mbaud on the board,
+and by `--ram-init` in litex_sim. A BusyBox initramfs and `sim/litex/l7_test.py`'s
+command set, modelled on RD68031's rd-virt. Two FPU processes preempting each other
+froze the machine: an FSAVE that RD68884's microcode never answered
+(`patches/RD68884`, reduced to `sim/litex/fpswitch`).
+
+**L8 — buildroot.** A br2-external tree (`buildroot/`), buildroot's internal glibc
+toolchain for the 68030 with hard float, the kernel from `patches/linux`, a cpio
+initramfs; `litex_rd68031_fpu_defconfig`. Gate: boots to a login on the Wukong, and
+`l7_test.py` passes against it.
+
+**L9 — later, noted.** The FPU-less variant with a soft-float userspace; ethernet and
+SD card (device tree for m68k, or platform data for liteeth and litex_mmc);
+upstreaming `arch/m68k/litex` and the RD68884 fix.
+
 **Later (out of this plan's scope, noted for design choices now):**
-- Linux/buildroot: m68k Linux has no LiteX platform. Options: an `arch/m68k` LiteX
-  machine (LiteX UART/timer drivers already exist generically; needs bootinfo, IRQ,
-  clock source) — possibly building on what `rd-virt` does (`doc/virt.md`). Needs DDR3,
-  a timer interrupt, and a bootloader that builds the bootinfo.
 - Hard CPU: reuse the bridge as the FPGA-side slave with pin I/O + synchronisers;
   a `category="hardcore"` CPU class with no RTL.
 

@@ -99,7 +99,8 @@ class M68030ToWishbone(LiteXModule):
       instruction exception (UM 7.4.2), and a coprocessor access with no
       coprocessor to answer it the F-line exception (UM 10.1.1). A cycle to a
       coprocessor in `coprocessors` (CpIDs) is left alone: that coprocessor is
-      on the bus too, and answers it with DSACK.
+      on the bus too, and answers it with DSACK; BERR if it has not after
+      `coprocessor_timeout` clocks.
 
     Timing, rising edges only (the processor's own rising edges, in its clock
     domain): AS is asserted in S1, on a falling edge, and is seen on the rising
@@ -109,7 +110,8 @@ class M68030ToWishbone(LiteXModule):
     from registers, so it has a full clock to meet STERM and CIIN and half a
     clock for the data, AVEC and BERR, which are sampled on falling edges.
     """
-    def __init__(self, bus=None, wishbone_bus=None, io_regions={}, timeout=1024, coprocessors=()):
+    def __init__(self, bus=None, wishbone_bus=None, io_regions={}, timeout=1024, coprocessors=(),
+                 coprocessor_timeout=1024):
         self.bus      = bus = Record(m68030_bus_layout) if bus is None else bus
         self.wishbone = wb  = wishbone.Interface(data_width=32, address_width=32, addressing="word") \
                               if wishbone_bus is None else wishbone_bus
@@ -211,9 +213,20 @@ class M68030ToWishbone(LiteXModule):
             ),
         )
         # A cycle another slave on the bus answers (a coprocessor's, UM 10.1).
+        # Should it never answer, a bus error after `coprocessor_timeout`
+        # clocks, as a board's bus watchdog would: the processor takes an
+        # exception instead of waiting on the cycle for ever, with nothing,
+        # not even an interrupt, able to get it out.
+        cp_count = Signal(max=coprocessor_timeout + 1)
         fsm.act("ELSEWHERE",
+            NextValue(cp_count, cp_count + 1),
             If(bus.as_n,
+                NextValue(cp_count, 0),
                 NextState("IDLE"),
+            ).Elif(cp_count == coprocessor_timeout - 1,
+                NextValue(cp_count, 0),
+                NextValue(berr_n, 0),
+                NextState("END"),
             ),
         )
         # STERM is one clock (UM 7.3.4: negated within two). AVEC and BERR are held
