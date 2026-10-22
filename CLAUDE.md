@@ -41,6 +41,7 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | Path | What |
 |---|---|
 | `doc/plan.md` | the plan: milestones L0-L10 and why |
+| `doc/porting-bsd.md` | for porting a BSD OS: the boot protocol and a specification of each driver the SoC needs, from BSD and observed sources only (no GPL code) |
 | `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), and the Motorola and board documentation (add-only) |
 | `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, L1-L5's bridge (`RD68031.bus_bridge = "sync"`) |
 | `litex_68k/m68030_fifo.py` | L6: the FIFO bridge, the default: the CPU on any clock, burst line fills, main RAM on a 128-bit LiteDRAM port (`doc/l6-fifo-bridge.md`) |
