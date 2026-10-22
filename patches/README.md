@@ -15,7 +15,8 @@ One subdirectory per project, named after it (`patches/litex/`, `patches/RD68031
 
 - `linux/`: Linux 7.2.9, the m68k LiteX machine (L7, `doc/l7-linux.md`), and
   its devices from a device tree (L10, `doc/l10-devicetree.md`).
-- `litex/`: LiteX, `litex_json2dts_linux` for m68k (L10); the copy is made by
+- `litex/`: LiteX, `litex_json2dts_linux` for m68k and the SD card driver's SCR
+  on a big-endian CPU (L10); the copy is made by
   `scripts/patch_litex.sh`.
 - `gcc/`: gcc 15.3.0, `--with-float=soft` for m68k, for the FPU-less
   buildroot (L9, `doc/l9-nofpu.md`).

@@ -1,0 +1,54 @@
+From edcec1c06e0c5bd0370acc3a9975f94ce40aef29 Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Thu, 22 Oct 2026 13:22:27 +0200
+Subject: [PATCH] liblitesdcard: read the SCR in the card's byte order on any
+ CPU
+
+sdcard_decode_scr() byte-swapped the two SCR words the DMA had written,
+which is right only on a little-endian CPU: the DMA writes the register
+as the card sends it, most significant byte first. On a big-endian CPU
+(m68k, RD68031) the swap scrambled it, the 4-bit support bit read 0, and
+sdcard_init() left the card and the PHY in 1-bit mode: slower, and a
+kernel taking the card over (Linux's litex_mmc, which assumes the PHY's
+reset setting, 4-bit) then failed its first data transfer on CRC.
+
+Read the SCR bytes in order instead, which is right on either.
+---
+ litex/soc/software/liblitesdcard/sdcard.c | 12 +++++-------
+ 1 file changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/litex/soc/software/liblitesdcard/sdcard.c b/litex/soc/software/liblitesdcard/sdcard.c
+index 37e3fa309..5d9280e8c 100644
+--- a/litex/soc/software/liblitesdcard/sdcard.c
++++ b/litex/soc/software/liblitesdcard/sdcard.c
+@@ -37,11 +37,6 @@
+ 
+ #define DIV_ROUND_UP(n, d) (((n) + (d) - 1) / (d))
+ 
+-#define BSWAP_32(x) ((uint32_t)((((x) >> 24) & 0xff) |  \
+-				(((x) >> 8) & 0xff00) | \
+-				(((x) & 0xff00) << 8) | \
+-				(((x) & 0xff) << 24)))
+-
+ #ifdef SDCARD_CMD23_SUPPORT
+ /* has to be a int, using bool didn't work on vexiiriscv */
+ static unsigned int support_cmd23;
+@@ -466,10 +461,13 @@ void sdcard_decode_csd(void) {
+ 
+ static void sdcard_decode_scr(const uint32_t *scr, bool *support_4bit)
+ {
++	/* The DMA wrote the SCR as the card sent it, most significant byte
++	   first: read it so, whatever the CPU's byte order. */
++	const uint8_t *b = (const uint8_t *)scr;
+ 	uint32_t raw_scr[2];
+ 
+-	raw_scr[0] = BSWAP_32(scr[0]);
+-	raw_scr[1] = BSWAP_32(scr[1]);
++	raw_scr[0] = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8) | b[3];
++	raw_scr[1] = ((uint32_t)b[4] << 24) | ((uint32_t)b[5] << 16) | ((uint32_t)b[6] << 8) | b[7];
+ 
+ 	*support_4bit = (raw_scr[0] >> 18) & 0x1;
+ 
+-- 
+2.47.3
+

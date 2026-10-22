@@ -27,3 +27,20 @@ The binding is in `patches/linux` 0002
 (`Documentation/devicetree/bindings/interrupt-controller/litex,m68k-intc.yaml`).
 
 **Upstream:** not sent. It goes with the kernel's binding; a sign-off is needed.
+
+## 0002-liblitesdcard-read-the-SCR-in-the-card-s-byte-order-.patch
+
+**What:** `sdcard_decode_scr()` reads the card's SCR as the bytes the DMA wrote,
+most significant first, instead of byte-swapping the two words it read.
+
+**Why:** the swap was right only on a little-endian CPU. On RD68031 (big-endian)
+the SCR came out scrambled and its 4-bit support bit read 0, so the BIOS's
+`sdcard_init` left the card and LiteSDCard's PHY in 1-bit mode. The BIOS's own
+reads still worked (slowly), but Linux's `litex_mmc`, taking the card over, puts
+it in 4-bit mode and assumes the PHY's reset setting (4-bit): its first data
+transfer then failed on CRC, and a root filesystem on the card was never found
+(L10, booting from the SD card: `doc/l10-devicetree.md`). Found by reading the
+PHY's `settings` CSR from the BIOS: 1 (4-bit) after reset, 0 after `sdcard_init`.
+
+**Upstream:** not sent; a sign-off is needed. On a little-endian CPU the result
+is the same as before.

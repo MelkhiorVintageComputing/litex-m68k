@@ -162,5 +162,14 @@ int main(void)
 	timer0_en_write(0);
 	timer0_ev_enable_write(0);
 	timer0_ev_pending_write(timer0_ev_pending_read());
+#ifdef CSR_SDCARD_PHY_SETTINGS_ADDR
+	/* LiteSDCard's PHY data width back to its reset value, 4-bit: Linux's
+	 * litex_mmc never sets it (it puts the card in 4-bit mode and assumes
+	 * the PHY is), and the BIOS's sdcard_init may leave it at 1-bit (it
+	 * did on m68k, reading the card's SCR in the wrong byte order:
+	 * patches/litex 0002; the kernel then failed its first data transfer
+	 * on CRC). */
+	sdcard_phy_settings_write(1);          /* SD_PHY_SPEED_4X */
+#endif
 	jump_kernel(MAIN_RAM_BASE + eh->entry);
 }

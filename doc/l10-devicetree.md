@@ -79,6 +79,58 @@ for the patched `litex_json2dts_linux`.
   variants): IPv4, packet sockets, LiteEth, MMC, LiteSDCard, VFAT. BusyBox
   gets `mkfs.ext2`, `mkfs.vfat` and `nc`.
 
+## Booting from the SD card
+
+The card is partitioned and filled from the board itself, over Ethernet, which is
+also a stress test of both (a disk image written on the host would be simpler):
+
+```sh
+# with a card that already boots, stop the BIOS first (Q at "Press Q or ESC"): the test needs its prompt
+sim/litex/l7_test.py --login --sd-install --serial /dev/ttyUSB0 --speed 1000000 \
+    --linux-dir ~/LITEX-68K/build/buildroot-fpu/images \
+    --build-dir build/qmtech_wukong_30m_fpu_1m_io      # overwrites the card
+sim/litex/l7_test.py --login --sd-boot \
+    --load build/qmtech_wukong_30m_fpu_1m_io/gateware/qmtech_wukong.bit \
+    --serial /dev/ttyUSB0 --speed 1000000 \
+    --linux-dir ~/LITEX-68K/build/buildroot-fpu/images \
+    --build-dir build/qmtech_wukong_30m_fpu_1m_io
+```
+
+- **The card** (`sd_install`, after the board booted its initramfs as usual):
+  - p1, FAT, 64 MiB: what the BIOS's `sdcardboot` loads. Its `boot.json` is
+    `images.json`'s format: the kernel, the device tree, `params.bin` (command
+    line `console=liteuart0 root=/dev/mmcblk0p2 rootwait`, no initramfs) and
+    litexboot, last, which the BIOS jumps to. Also `nofpu/vmlinux`, the
+    FPU-less kernel, for that SoC.
+  - p2, ext2, 256 MiB: the FPU buildroot's root filesystem.
+  - p3, ext2, 256 MiB: the FPU-less one.
+- **Its checks:**
+  - every file fetched by HTTP from this host and checked by md5;
+  - each root filesystem, unpacked from its cpio as it streams in, checked by
+    a manifest: the md5 of every regular file's md5, as on the host;
+  - all of it again from the card, unmounted and every cache dropped.
+- **The boot** (`--sd-boot`):
+  - the test loads the bitstream itself, the serial port open, so that the
+    BIOS's whole boot is seen;
+  - finding no litex_term, the BIOS boots from the card (priority 30, after
+    serial boot);
+  - the kernel mounts p2 (`/dev/root / ext2 rw` is checked) and runs
+    `/sbin/init`.
+- **What it took:**
+  - **A LiteX bug** (`patches/litex` 0002):
+    - The first boot from the card found no root: Linux's `litex_mmc` failed
+      its first data transfer (the card's SCR) on CRC, and again on every
+      retry.
+    - The BIOS's own card initialisation was the trigger. Its SCR decode
+      byte-swapped words that a big-endian CPU had read right, so it thought
+      the card had no 4-bit mode, and left LiteSDCard's PHY in 1-bit mode.
+    - Linux puts the card in 4-bit mode and never sets the PHY, whose reset
+      value it assumes.
+    - Read from the BIOS: the PHY's `settings` CSR was 1 (4-bit) after reset,
+      0 after `sdcard_init`.
+  - **litexboot** puts the PHY's width back to 4-bit before jumping, whatever
+    the BIOS did.
+
 ## The tests
 
 - **With a device tree** (both settings): the root's compatible is
@@ -118,7 +170,16 @@ for the patched `litex_json2dts_linux`.
   - Every command was right before that.
   - Both `/proc/interrupts` snapshots in the log show the counts rising:
     timer0 1480 to 2496, liteuart 171 to 2720.
-- **The board's Vivado build:** WNS +0.076 ns.
+- **Booting from the SD card** (the board, with `patches/litex` 0002 in the BIOS):
+  - `--sd-install`, twice: 12 files and two root filesystems (7824 and 5281
+    cpio blocks) over Ethernet in 247-253 s, every check right, from the
+    card too;
+  - `--sd-boot`: the BIOS loads the images from the card in 11 s, the login
+    40 s after litexboot (57 s with the initramfs), the command set and the
+    device tree checks right on the card's root: PASS, 130 s from the
+    bitstream's load.
+- **The board's Vivado build:** WNS +0.076 ns (+0.189 ns with the BIOS's
+  SCR fix).
 - **The bus time-out change:** L4 (`l4_test.py --variant standard+fpu`,
   cputest's bus errors at an unmapped address included) passes in litex_sim
   with it.
