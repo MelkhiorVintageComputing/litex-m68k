@@ -41,6 +41,7 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | Path | What |
 |---|---|
 | `doc/plan.md` | the plan: milestones L0-L10 and why |
+| `doc/board.md` | the board for software work: the current bitstream (`~/LITEX-68K/bitstreams/`), `scripts/board.py` to load it and boot a kernel, interactive or unattended |
 | `doc/porting-bsd.md` | for porting a BSD OS: the boot protocol and a specification of each driver the SoC needs, from BSD and observed sources only (no GPL code) |
 | `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), and the Motorola and board documentation (add-only) |
 | `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, L1-L5's bridge (`RD68031.bus_bridge = "sync"`) |
@@ -58,6 +59,8 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | `sim/litex/fpswitch/` | two FPU tasks switched by timer0, the FPU saved as Linux does (`fpswitch_test.py`); the reduction of L7's FSAVE freeze |
 | `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented: `linux/` (the m68k LiteX machine, and its devices from a device tree), `litex/` (json2dts for m68k; the SD card driver's SCR on a big-endian CPU), `gcc/` (m68k soft float: `--with-float=soft`, musl's `-sf` loader, exact `long double`; host tests in `gcc/test/`), `musl/` (setjmp without an FPU); `RD68884/` has none (L7's fix is upstream) |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
+| `scripts/board.py` | load a bitstream snapshot, stop the BIOS, boot a kernel by serial or from the SD card, a console; `--until`/`--send` for unattended runs (`doc/board.md`) |
+| `scripts/snapshot_bitstream.sh` | copies a board build (bitstream, CSR maps, software) to `~/LITEX-68K/bitstreams/NAME` |
 | `scripts/patch_litex.sh` | makes `~/LITEX-68K/litex` (or another LiteX repository) from `~/LITEX` and `patches/litex`; `setup_venv.sh` then prefers it |
 | `scripts/patch_rd68884.sh` | when `patches/RD68884` has patches: makes `~/LITEX-68K/RD68884`, `Inputs/RD68884` with them and its microcode regenerated |
 | `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031`, and the FPU from `Inputs/RD68884` (or its patched copy, `scripts/patch_rd68884.sh`) |

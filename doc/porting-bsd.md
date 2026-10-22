@@ -825,6 +825,9 @@ covers the machine's core.
 6. **A root filesystem**: an initramfs or memory disk first (`BI_RAMDISK`),
    then the SD card (6.6), then the network (6.7).
 
+The board: `doc/board.md` (where the bitstream is, `scripts/board.py` to load
+it and boot a kernel, interactively or unattended).
+
 Test harness (this project, BSD):
 - `sim/litex/l7_test.py` boots images in litex_sim or on the board, logs in
   and runs a command set. It can be pointed at any kernel and root image that

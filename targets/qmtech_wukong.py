@@ -53,8 +53,9 @@ from litex_68k.cpu.rd68031.core import RD68031
 TOP = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 VIVADO_SETTINGS = os.environ.get("LITEX_ENV_VIVADO", "/opt/Xilinx/2025.2/Vivado")
 
-def vivado_load(bitstream):
-    """Load a bitstream into the FPGA (its configuration memory, not the flash)."""
+def vivado_load(bitstream, log=None):
+    """Load a bitstream into the FPGA (its configuration memory, not the flash).
+    Vivado's output goes to `log` (a file name) if given."""
     bitstream = os.path.abspath(bitstream)
     tcl = os.path.splitext(bitstream)[0] + "_load.tcl"
     with open(tcl, "w") as f:
@@ -68,7 +69,12 @@ def vivado_load(bitstream):
                 "disconnect_hw_server\n".format(bitstream))
     cmd = "source {}/settings64.sh && vivado -mode batch -nojournal -nolog -source {}".format(
         VIVADO_SETTINGS, tcl)
-    subprocess.check_call(["bash", "-c", cmd], cwd=os.path.dirname(tcl))
+    if log is None:
+        subprocess.check_call(["bash", "-c", cmd], cwd=os.path.dirname(tcl))
+    else:
+        with open(log, "w") as f:
+            subprocess.check_call(["bash", "-c", cmd], cwd=os.path.dirname(tcl),
+                                  stdout=f, stderr=subprocess.STDOUT)
 
 def get_option(argv, opt, default=None, remove=False):
     """The value of `opt value` or `opt=value` in argv, taken out if `remove`."""
