@@ -178,8 +178,14 @@ gcc defaulting to soft float, libgcc's `long double` made exact (`patches/gcc`),
 musl's setjmp without FPU registers (`patches/musl`), the kernel with its FPU
 emulator, and a post-build check that no FPU instruction is left.
 
-**Later, noted.** Ethernet and SD card (device tree for m68k, or platform data for
-liteeth and litex_mmc); upstreaming `arch/m68k/litex` and `patches/gcc`,
+**L10 — a device tree, Ethernet and the SD card.** *Done, in litex_sim and on the Wukong:
+`doc/l10-devicetree.md`.* litexboot passes the device tree LiteX's json2dts makes
+(`patches/litex`: its m68k branch) in a bootinfo record; the kernel unflattens it
+for the drivers (`patches/linux` 0002), the machine's core staying on bootinfo.
+LiteEth and LiteSDCard on the Wukong (`--with-ethernet --with-sdcard`, L2 cache
+off), the SD emulator in litex_sim.
+
+**Later, noted.** Upstreaming `arch/m68k/litex`, `patches/litex`, `patches/gcc`,
 `patches/musl` (the RD68884 fix is upstream: 7a188db).
 
 **Later (out of this plan's scope, noted for design choices now):**

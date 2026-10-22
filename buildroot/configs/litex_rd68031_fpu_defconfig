@@ -26,7 +26,8 @@ BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
 BR2_TARGET_GENERIC_GETTY_PORT="ttyLXU0"
 BR2_TARGET_GENERIC_GETTY_BAUDRATE_KEEP=y
 BR2_SYSTEM_DHCP=""
-# No network yet: no ifup scripts
+# No network configured at boot (the board's is tested by hand, udhcpc): no
+# ifup scripts
 # BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
 BR2_ENABLE_LOCALE_PURGE=y
 BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/post-image.sh"
@@ -39,6 +40,9 @@ BR2_LINUX_KERNEL_PATCH="$(BR2_EXTERNAL_LITEX68K_PATH)/../patches/linux"
 BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
 BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/linux.defconfig"
 BR2_LINUX_KERNEL_VMLINUX=y
+# dtc for the host: images.py compiles the SoC's device tree with it (L10,
+# doc/l10-devicetree.md)
+BR2_PACKAGE_HOST_DTC=y
 
 # BusyBox, with awk's math functions
 BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/busybox.config"

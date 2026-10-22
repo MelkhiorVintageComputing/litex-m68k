@@ -1,0 +1,353 @@
+From b9d08e5434f8bfee5f70df7256eebba10c1b6d5e Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Thu, 22 Oct 2026 10:02:40 +0200
+Subject: [PATCH] m68k: litex: the SoC's devices from a device tree
+
+The LiteX drivers other than LiteUART need a device tree: LiteEth reads
+its buffer layout from its node's properties, and LiteSDCard its clock
+and regulator. Let the boot loader pass the device tree LiteX's json2dts
+makes for the SoC, in a new bootinfo record, BI_LITEX_DTB (its physical
+address and size).
+
+- The blob is reserved for good, then unflattened once the memory is
+  mapped; the OF core creates the devices. Only the devices: the memory,
+  the command line and the initrd stay the bootinfo's, so /memory and
+  /chosen are not read.
+- OF_EARLY_FLATTREE, which has unflatten_device_tree(), excludes m68k:
+  not for this machine.
+- The CPU's interrupt controller is the tree's "litex,m68k-intc" node (a
+  new binding): a legacy domain, so that a device's interrupt n is line
+  n, Linux interrupt IRQ_USER + n as before.
+- The common clock framework, for the tree's fixed clocks
+  (of_clk_init()).
+- LiteUART is registered from its bootinfo record only when the tree
+  has no node for it.
+
+Without BI_LITEX_DTB, nothing changes.
+---
+ .../interrupt-controller/litex,m68k-intc.yaml | 46 +++++++++++++++++++
+ arch/m68k/Kconfig.machine                     | 16 ++++---
+ arch/m68k/include/asm/config.h                |  1 +
+ arch/m68k/include/asm/litex.h                 |  2 +
+ arch/m68k/include/uapi/asm/bootinfo-litex.h   |  3 ++
+ arch/m68k/kernel/setup_mm.c                   |  5 ++
+ arch/m68k/litex/config.c                      | 31 +++++++++++++
+ arch/m68k/litex/ints.c                        | 15 ++++++
+ arch/m68k/litex/platform.c                    |  8 ++++
+ arch/m68k/litex/timer.c                       |  4 ++
+ drivers/of/Kconfig                            |  2 +-
+ 11 files changed, 126 insertions(+), 7 deletions(-)
+ create mode 100644 Documentation/devicetree/bindings/interrupt-controller/litex,m68k-intc.yaml
+
+diff --git a/Documentation/devicetree/bindings/interrupt-controller/litex,m68k-intc.yaml b/Documentation/devicetree/bindings/interrupt-controller/litex,m68k-intc.yaml
+new file mode 100644
+index 000000000..2a1e8f237
+--- /dev/null
++++ b/Documentation/devicetree/bindings/interrupt-controller/litex,m68k-intc.yaml
+@@ -0,0 +1,46 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/interrupt-controller/litex,m68k-intc.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Interrupt controller of an m68k CPU in a LiteX SoC
++
++maintainers:
++  - Romain Dolbeau <romain@dolbeau.org>
++
++description: |
++  A 68030-class CPU in a SoC built with LiteX takes every interrupt line of
++  the SoC on one autovectored level. Two CSRs of the CPU give the lines: a
++  pending register (offset 0x0, read only), the lines as they are, and a mask
++  register (offset 0x4), the lines allowed to interrupt. The lines are levels.
++  The interrupt specifier is the line, 0 to 31.
++
++properties:
++  compatible:
++    const: litex,m68k-intc
++
++  reg:
++    maxItems: 1
++
++  interrupt-controller: true
++
++  '#interrupt-cells':
++    const: 1
++
++required:
++  - compatible
++  - reg
++  - interrupt-controller
++  - '#interrupt-cells'
++
++additionalProperties: false
++
++examples:
++  - |
++    interrupt-controller@f0000000 {
++        compatible = "litex,m68k-intc";
++        reg = <0xf0000000 0x8>;
++        interrupt-controller;
++        #interrupt-cells = <1>;
++    };
+diff --git a/arch/m68k/Kconfig.machine b/arch/m68k/Kconfig.machine
+index 41191de6e..24c37f377 100644
+--- a/arch/m68k/Kconfig.machine
++++ b/arch/m68k/Kconfig.machine
+@@ -147,19 +147,23 @@ config VIRT
+ config M68K_LITEX
+ 	bool "LiteX SoC support"
+ 	depends on MMU
++	select COMMON_CLK
+ 	select GENERIC_CLOCKEVENTS
++	select IRQ_DOMAIN
+ 	select LITEX
+ 	select OF
+ 	select TTY
+ 	help
+ 	  A Motorola 68030-class CPU in a SoC built with LiteX
+ 	  (https://github.com/enjoy-digital/litex): for instance RD68031, an
+-	  MC68030 soft core, on an FPGA. The SoC's cores (LiteUART, Timer0,
+-	  the SoC controller) and the CPU's interrupt controller are found
+-	  through bootinfo records, not a device tree; the boot loader writes
+-	  them from the SoC's generated headers. OF is selected only so that
+-	  the LiteX drivers (SERIAL_LITEUART) can be built; they are probed as
+-	  plain platform devices. Select your CPU below.
++	  MC68030 soft core, on an FPGA. The machine's own cores (Timer0, the
++	  SoC controller, the CPU's interrupt controller, LiteUART's early
++	  console) are found through bootinfo records, which the boot loader
++	  writes from the SoC's generated headers. The other devices, for
++	  their drivers (LiteUART, LiteEth, LiteSDCard), come from a flattened
++	  device tree the boot loader passes in a bootinfo record too, as
++	  LiteX's json2dts makes it; without one, LiteUART is registered from
++	  its bootinfo record. Select your CPU below.
+ 
+ config PILOT
+ 	bool
+diff --git a/arch/m68k/include/asm/config.h b/arch/m68k/include/asm/config.h
+index 1c7aebd7d..d4fc5d614 100644
+--- a/arch/m68k/include/asm/config.h
++++ b/arch/m68k/include/asm/config.h
+@@ -33,5 +33,6 @@ extern void config_sun3(void);
+ extern void config_sun3x(void);
+ extern void config_virt(void);
+ extern void config_litex(void);
++extern void litex_init_dt(void);
+ 
+ #endif /* _M68K_CONFIG_H */
+diff --git a/arch/m68k/include/asm/litex.h b/arch/m68k/include/asm/litex.h
+index 586d7fa85..5fb825c50 100644
+--- a/arch/m68k/include/asm/litex.h
++++ b/arch/m68k/include/asm/litex.h
+@@ -31,6 +31,8 @@ struct litex_booter_data {
+ 	struct litex_booter_device ctrl;
+ 	struct litex_booter_device uart;
+ 	struct litex_booter_device timer0;
++	u32 dtb_addr;	/* physical; 0: no device tree */
++	u32 dtb_size;
+ };
+ 
+ extern struct litex_booter_data litex_bi_data;
+diff --git a/arch/m68k/include/uapi/asm/bootinfo-litex.h b/arch/m68k/include/uapi/asm/bootinfo-litex.h
+index d065b16f2..82abef1a8 100644
+--- a/arch/m68k/include/uapi/asm/bootinfo-litex.h
++++ b/arch/m68k/include/uapi/asm/bootinfo-litex.h
+@@ -20,5 +20,8 @@
+ #define BI_LITEX_UART		0x8003	/* __be32 base, __be32 line: LiteUART */
+ #define BI_LITEX_TIMER0		0x8004	/* __be32 base, __be32 line: Timer, with
+ 					   its uptime counter */
++#define BI_LITEX_DTB		0x8005	/* __be32 physical address, __be32 size:
++					   a flattened device tree of the SoC's
++					   devices, for their drivers */
+ 
+ #endif /* _UAPI_ASM_M68K_BOOTINFO_LITEX_H */
+diff --git a/arch/m68k/kernel/setup_mm.c b/arch/m68k/kernel/setup_mm.c
+index d2b6c9571..e66d91898 100644
+--- a/arch/m68k/kernel/setup_mm.c
++++ b/arch/m68k/kernel/setup_mm.c
+@@ -339,6 +339,11 @@ void __init setup_arch(char **cmdline_p)
+ 
+ 	paging_init();
+ 
++#ifdef CONFIG_M68K_LITEX
++	if (MACH_IS_LITEX)
++		litex_init_dt();
++#endif
++
+ 	if (IS_ENABLED(CONFIG_BLK_DEV_INITRD) && m68k_ramdisk.size) {
+ 		initrd_start = (unsigned long)phys_to_virt(m68k_ramdisk.addr);
+ 		initrd_end = initrd_start + m68k_ramdisk.size;
+diff --git a/arch/m68k/litex/config.c b/arch/m68k/litex/config.c
+index 43645c2d1..035069244 100644
+--- a/arch/m68k/litex/config.c
++++ b/arch/m68k/litex/config.c
+@@ -9,6 +9,8 @@
+ 
+ #include <linux/kernel.h>
+ #include <linux/litex.h>
++#include <linux/memblock.h>
++#include <linux/of_fdt.h>
+ #include <linux/serial_core.h>
+ 
+ #include <asm/bootinfo.h>
+@@ -67,6 +69,10 @@ int __init litex_parse_bootinfo(const struct bi_record *record)
+ 	case BI_LITEX_TIMER0:
+ 		litex_device(&litex_bi_data.timer0, data);
+ 		break;
++	case BI_LITEX_DTB:
++		litex_bi_data.dtb_addr = be32_to_cpu(data[0]);
++		litex_bi_data.dtb_size = be32_to_cpu(data[1]);
++		break;
+ 	default:
+ 		return 1;
+ 	}
+@@ -83,8 +89,33 @@ void __init config_litex(void)
+ 		setup_earlycon(earlycon);
+ 	}
+ 
++	/* Kept for good: the unflattened tree points into it. */
++	if (litex_bi_data.dtb_addr)
++		memblock_reserve(litex_bi_data.dtb_addr, litex_bi_data.dtb_size);
++
+ 	mach_init_IRQ = litex_init_IRQ;
+ 	mach_sched_init = litex_sched_init;
+ 	mach_get_model = litex_get_model;
+ 	mach_reset = litex_reset;
+ }
++
++/*
++ * The SoC's devices, for their drivers, from the boot loader's device tree
++ * (BI_LITEX_DTB), once the memory is mapped. Only the devices: the memory,
++ * the command line and the initrd are the bootinfo's, so /memory and /chosen
++ * are not read. Without a device tree, the machine's own devices
++ * (platform.c) are registered.
++ */
++void __init litex_init_dt(void)
++{
++	phys_addr_t pa = litex_bi_data.dtb_addr;
++
++	if (!pa)
++		return;
++	if (!early_init_dt_verify(phys_to_virt(pa), pa)) {
++		pr_err("litex: no valid device tree at %pa\n", &pa);
++		return;
++	}
++	unflatten_device_tree();
++	pr_info("litex: device tree for %s\n", of_flat_dt_get_machine_name());
++}
+diff --git a/arch/m68k/litex/ints.c b/arch/m68k/litex/ints.c
+index 204f57215..c8e857c1f 100644
+--- a/arch/m68k/litex/ints.c
++++ b/arch/m68k/litex/ints.c
+@@ -5,12 +5,18 @@
+  * lines as they are (pending) and the lines allowed to interrupt (mask).
+  * Line n is Linux interrupt LITEX_IRQ_BASE + n. The lines are levels: a core
+  * keeps its line up until its driver acknowledges it.
++ *
++ * With a device tree (BI_LITEX_DTB), the controller is its "litex,m68k-intc"
++ * node, and a device's interrupt n is that line: a legacy domain, which keeps
++ * the numbering above.
+  */
+ 
+ #include <linux/interrupt.h>
+ #include <linux/irq.h>
++#include <linux/irqdomain.h>
+ #include <linux/kernel.h>
+ #include <linux/litex.h>
++#include <linux/of.h>
+ #include <linux/spinlock.h>
+ 
+ #include <asm/irq.h>
+@@ -72,6 +78,8 @@ static void litex_irq_demux(struct irq_desc *desc)
+ 
+ void __init litex_init_IRQ(void)
+ {
++	struct device_node *np;
++
+ 	litex_irq_base = (void __iomem *)litex_bi_data.irqctrl.base;
+ 	litex_irq_mask = 0;
+ 	litex_write32(litex_irq_base + LITEX_IRQ_MASK, 0);
+@@ -81,4 +89,11 @@ void __init litex_init_IRQ(void)
+ 
+ 	/* IRQ_AUTO_n is n: the autovectored level of the controller. */
+ 	irq_set_chained_handler(litex_bi_data.irqctrl.irq, litex_irq_demux);
++
++	/* The domain keeps its reference to the node. */
++	np = of_find_compatible_node(NULL, NULL, "litex,m68k-intc");
++	if (np && !irq_domain_create_legacy(of_fwnode_handle(np), LITEX_NR_IRQS,
++					    LITEX_IRQ_BASE, 0,
++					    &irq_domain_simple_ops, NULL))
++		pr_err("litex: no interrupt domain for %pOF\n", np);
+ }
+diff --git a/arch/m68k/litex/platform.c b/arch/m68k/litex/platform.c
+index 506b46c0f..c5de0e652 100644
+--- a/arch/m68k/litex/platform.c
++++ b/arch/m68k/litex/platform.c
+@@ -1,10 +1,12 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+  * The LiteX cores Linux has a driver for, as platform devices: LiteUART.
++ * With a device tree, its own node makes the device instead.
+  */
+ 
+ #include <linux/init.h>
+ #include <linux/ioport.h>
++#include <linux/of.h>
+ #include <linux/platform_device.h>
+ 
+ #include <asm/litex.h>
+@@ -16,9 +18,15 @@ static int __init litex_platform_init(void)
+ {
+ 	struct resource res[2];
+ 	struct platform_device *pdev;
++	struct device_node *np;
+ 
+ 	if (!MACH_IS_LITEX || !litex_bi_data.uart.base)
+ 		return -ENODEV;
++	np = of_find_compatible_node(NULL, NULL, "litex,liteuart");
++	if (np) {
++		of_node_put(np);
++		return 0;
++	}
+ 
+ 	res[0] = (struct resource)DEFINE_RES_MEM(litex_bi_data.uart.base,
+ 						  LITEX_UART_SIZE);
+diff --git a/arch/m68k/litex/timer.c b/arch/m68k/litex/timer.c
+index 783dc974a..648b3a721 100644
+--- a/arch/m68k/litex/timer.c
++++ b/arch/m68k/litex/timer.c
+@@ -9,6 +9,7 @@
+  * delta, reload = 0. Periodic: load = reload = period - 1.
+  */
+ 
++#include <linux/clk-provider.h>
+ #include <linux/clockchips.h>
+ #include <linux/clocksource.h>
+ #include <linux/interrupt.h>
+@@ -95,6 +96,9 @@ void __init litex_sched_init(void)
+ {
+ 	unsigned int irq = LITEX_IRQ_BASE + litex_bi_data.timer0.irq;
+ 
++	/* The device tree's fixed clocks, which drivers ask for. */
++	of_clk_init(NULL);
++
+ 	timer_base = (void __iomem *)litex_bi_data.timer0.base;
+ 	litex_write32(timer_base + TIMER_EN, 0);
+ 	litex_write32(timer_base + TIMER_EV_PENDING, 1);
+diff --git a/drivers/of/Kconfig b/drivers/of/Kconfig
+index 50697cc3b..2d4a18ac3 100644
+--- a/drivers/of/Kconfig
++++ b/drivers/of/Kconfig
+@@ -68,7 +68,7 @@ config OF_FLATTREE
+ 	select CRC32
+ 
+ config OF_EARLY_FLATTREE
+-	def_bool OF && !(SPARC || ALPHA || HEXAGON || M68K || PARISC || S390)
++	def_bool OF && !(SPARC || ALPHA || HEXAGON || (M68K && !M68K_LITEX) || PARISC || S390)
+ 	select DMA_DECLARE_COHERENT if HAS_DMA && HAS_IOMEM
+ 	select OF_FLATTREE
+ 
+-- 
+2.47.3
+

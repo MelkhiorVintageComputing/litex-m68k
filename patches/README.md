@@ -13,7 +13,10 @@ One subdirectory per project, named after it (`patches/litex/`, `patches/RD68031
 - `README.md`: the upstream commit the series applies to, and for each patch what it
   changes, why this project needs it, and its upstream status (not sent, sent, merged).
 
-- `linux/`: Linux 7.2.9, the m68k LiteX machine (L7, `doc/l7-linux.md`).
+- `linux/`: Linux 7.2.9, the m68k LiteX machine (L7, `doc/l7-linux.md`), and
+  its devices from a device tree (L10, `doc/l10-devicetree.md`).
+- `litex/`: LiteX, `litex_json2dts_linux` for m68k (L10); the copy is made by
+  `scripts/patch_litex.sh`.
 - `gcc/`: gcc 15.3.0, `--with-float=soft` for m68k, for the FPU-less
   buildroot (L9, `doc/l9-nofpu.md`).
 - `musl/`: musl 1.2.6, m68k's setjmp and longjmp without FPU registers in

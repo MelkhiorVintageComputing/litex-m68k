@@ -5,12 +5,16 @@
 """The images litexboot boots Linux from, for one SoC (layout.h):
 
     images.py --build-dir <SoC build> --vmlinux V --initramfs I --loader B \\
-              --cmdline "console=liteuart" --out-dir D
+              --cmdline "console=liteuart" [--dtc DTC] --out-dir D
 
 writes, in D, copies of the vmlinux ELF (stripped), the initramfs and litexboot.bin, a
 params.bin saying where they are and the command line, and images.json, which
 both litex_term --images (the board) and litex_sim --ram-init (the simulation)
-take: {file: address}, litexboot last, since both jump to the last one."""
+take: {file: address}, litexboot last, since both jump to the last one.
+
+With --dtc, also the SoC's device tree (L10, doc/l10-devicetree.md): soc.dts from
+the build's csr.json by LiteX's litex_json2dts_linux (patches/litex: its m68k
+branch), compiled to soc.dtb by DTC, which litexboot passes to the kernel."""
 
 import argparse
 import json
@@ -21,7 +25,7 @@ import struct
 import subprocess
 
 PARAMS_MAGIC   = 0x4c584250
-PARAMS_VERSION = 1
+PARAMS_VERSION = 2
 PARAMS_CMDLINE = 256
 
 def main_ram(build_dir):
@@ -41,6 +45,8 @@ def main():
         help="The sys clock frequency told to the kernel (default: the SoC's). In "
              "litex_sim, everything runs at 1 MHz, and a tick every 10,000 CPU clocks "
              "(HZ=100) leaves the CPU no time: say 100e6.")
+    parser.add_argument("--dtc",       default=None,
+        help="dtc (buildroot's host-dtc): make and load the SoC's device tree.")
     parser.add_argument("--out-dir",   required=True)
     args = parser.parse_args()
 
@@ -48,6 +54,7 @@ def main():
     elf_addr    = base + size // 2
     initrd_addr = base + size // 4 * 3
     params_addr = base + size - 0x200000
+    dtb_addr    = base + size - 0x180000
     loader_addr = base + size - 0x100000
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -69,11 +76,25 @@ def main():
     if args.initramfs:
         initrd_size = place(args.initramfs, "initramfs.cpio.gz", initrd_addr, params_addr)
         images["initramfs.cpio.gz"] = "0x{:08x}".format(initrd_addr)
+    dtb_size = 0
+    if args.dtc:
+        from litex.tools.litex_json2dts_linux import generate_dts
+        dts = os.path.join(args.out_dir, "soc.dts")
+        dtb = os.path.join(args.out_dir, "soc.dtb")
+        with open(os.path.join(args.build_dir, "csr.json")) as f:
+            d = json.load(f)
+        with open(dts, "w") as f:
+            # The kernel takes its initrd and command line from the bootinfo,
+            # not /chosen: none there, so that the tree says nothing else.
+            f.write(generate_dts(d, initrd="disabled"))
+        subprocess.check_call([args.dtc, "-q", "-I", "dts", "-O", "dtb", "-o", dtb, dts])
+        dtb_size = place(dtb, "soc.dtb", dtb_addr, base + size - 0x100000)
+        images["soc.dtb"] = "0x{:08x}".format(dtb_addr)
     cmdline = args.cmdline.encode()
     assert len(cmdline) < PARAMS_CMDLINE, "command line too long"
     with open(os.path.join(args.out_dir, "params.bin"), "wb") as f:
-        f.write(struct.pack(">7L", PARAMS_MAGIC, PARAMS_VERSION, elf_addr, elf_size,
-                            initrd_addr, initrd_size, int(args.sys_clk)))
+        f.write(struct.pack(">9L", PARAMS_MAGIC, PARAMS_VERSION, elf_addr, elf_size,
+                            initrd_addr, initrd_size, int(args.sys_clk), dtb_addr, dtb_size))
         f.write(cmdline.ljust(PARAMS_CMDLINE, b"\0"))
     images["params.bin"] = "0x{:08x}".format(params_addr)
     place(args.loader, "litexboot.bin", loader_addr, base + size - 0x10000)

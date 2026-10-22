@@ -25,6 +25,12 @@ Two configurations (doc/l5-wukong.md):
 
 --cpu-variant standard+fpu adds the RD68884 FPU (core.py).
 
+--with-ethernet and --with-sdcard are litex-boards' (L10, doc/l10-devicetree.md).
+With the SD card, the L2 cache is off (--l2-size 0) unless asked for: the CPU
+reaches the DDR3 on a native port of its own (L6), the SD card's DMA through
+the SoC bus and its L2 cache, which would keep the DMA's writes from the CPU
+and hand the DMA stale lines.
+
 Defaults that differ from litex-boards': --cpu-type rd68031, --revision 3,
 --timer-uptime, the clocks above, and the output directory, in this repository.
 --bus-bridge (fifo or sync, RD68031.bus_bridge) is ours.
@@ -172,6 +178,8 @@ def main():
     for opt, value in defaults:
         if get_option(argv, opt) is None:
             argv = [opt, value] + argv
+    if "--with-sdcard" in argv and ddr3 and get_option(argv, "--l2-size") is None:
+        argv = ["--l2-size", "0"] + argv
     if "--timer-uptime" not in argv:            # for the BIOS's uptime command
         argv = ["--timer-uptime"] + argv
     sys.argv[1:] = argv

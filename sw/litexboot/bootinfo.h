@@ -21,6 +21,7 @@
 #define BI_LITEX_CTRL    0x8002
 #define BI_LITEX_UART    0x8003
 #define BI_LITEX_TIMER0  0x8004
+#define BI_LITEX_DTB     0x8005
 
 #define MACH_LITEX       15
 #define CPU_68030        (1 << 1)

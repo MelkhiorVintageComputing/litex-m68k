@@ -28,8 +28,12 @@ Prints the exchanges, then "L7 PASS" or "L7 FAIL: <why>"; exit status 0 on pass.
 """
 
 import argparse
+import hashlib
 import os
 import pty
+import shutil
+import socket
+import tempfile
 import re
 import signal
 import subprocess
@@ -75,15 +79,92 @@ LOGIN_COMMANDS = [
                                                r"1\.487327306"),
 ]
 
+# A device tree (L10, doc/l10-devicetree.md): the kernel unflattened
+# litexboot's, and LiteUART was made from its node (named after its address),
+# not from the bootinfo (named "liteuart").
+DT_COMMANDS = [
+    ("tr '\\0' ' ' < /sys/firmware/devicetree/base/compatible; echo", r"litex,\S+ litex,soc"),
+    ("ls /sys/bus/platform/drivers/liteuart/",  r"[0-9a-f]+\.serial"),
+]
+
+# --sdcard, in the simulation: litex_sim's SD card is litesdcard's emulator,
+# one 512-byte block whatever the address, its words 0 to 127 (big-endian).
+SIM_SD_COMMANDS = [
+    ("ls /sys/block/",                         r"mmcblk0"),
+    ("dd if=/dev/mmcblk0 bs=512 count=1 skip=8 2>/dev/null | md5sum", r"^{sd_block_md5}"),
+]
+
+def host_ip():
+    """This host's address on its default route (no packet is sent)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.0.2.1", 9))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+def io_checks(con, timeout, host, size=4 << 20):
+    """--io, a board with Ethernet and an SD card (L10, doc/l10-devicetree.md):
+    a DHCP lease, ping and an HTTP download from this host (its md5), then the
+    SD card overwritten: an ext2 filesystem, a file of random data written,
+    the card unmounted and mounted again, the file read back (its md5), and the
+    card's raw read rate."""
+    def sh(cmd, want, what, t=timeout):
+        t0 = time.time()
+        ans = con.command(cmd, timeout=t, until=SHELL_PROMPT).replace(SHELL_PROMPT, "")
+        print("\n[l7_test] {:.0f} s".format(time.time() - t0), flush=True)
+        m = re.search(want, ans, re.M)
+        check(m, "{}: {!r} answered {!r}".format(what, cmd, ans))
+        return m
+
+    # Ethernet: the file is served by this host, from a directory of its own.
+    serve = tempfile.mkdtemp(prefix="l10-http-")
+    blob = os.urandom(size)
+    with open(os.path.join(serve, "blob"), "wb") as f:
+        f.write(blob)
+    http = subprocess.Popen([sys.executable, "-m", "http.server", "--bind", host, "8642"],
+        cwd=serve, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        sh("ip link set eth0 up; udhcpc -i eth0 -n -q -t 10", r"lease of (\S+) obtained",
+           "Ethernet: no DHCP lease", 300)
+        sh("ping -c 3 {}".format(host), r"3 packets transmitted, 3 (packets )?received", "ping")
+        t0 = time.time()
+        sh("wget -q -O - http://{}:8642/blob | md5sum".format(host),
+           "^" + hashlib.md5(blob).hexdigest(), "HTTP download")
+        print("\n[l7_test] wget {} bytes: {:.0f} KB/s".format(size, size / 1024 / (time.time() - t0)),
+              flush=True)
+    finally:
+        stop(http)
+        shutil.rmtree(serve, ignore_errors=True)
+
+    # The SD card: a 64 MiB filesystem at its start, whatever its size.
+    sh("ls /sys/block/", r"mmcblk0", "SD card: no mmcblk0")
+    sh("mkfs.ext2 -q /dev/mmcblk0 65536 && echo mkfs ok", r"^mkfs ok", "mkfs.ext2", 900)
+    sh("mkdir -p /mnt/sd && mount /dev/mmcblk0 /mnt/sd && echo mounted", r"^mounted", "mount")
+    m = sh("dd if=/dev/urandom of=/mnt/sd/r bs=64k count=64 2>/dev/null; md5sum /mnt/sd/r",
+           r"^([0-9a-f]{32})", "write")
+    md5 = m.group(1)
+    # Unmounted and every clean cache dropped: read back from the card.
+    sh("umount /mnt/sd && sync && echo 3 > /proc/sys/vm/drop_caches && echo dropped",
+       r"^dropped", "umount")
+    sh("mount /dev/mmcblk0 /mnt/sd && md5sum /mnt/sd/r", "^" + md5,
+       "SD card: the file read back differs")
+    sh("umount /mnt/sd && echo umounted", r"^umounted", "umount")
+    sh("echo 3 > /proc/sys/vm/drop_caches && echo dropped", r"^dropped", "drop_caches")
+    m = sh("time dd if=/dev/mmcblk0 of=/dev/null bs=64k count=128", r"real\s+(.+)", "SD read rate")
+    print("\n[l7_test] SD card: 8 MiB read in {}".format(m.group(1)), flush=True)
+
 def run(cmd, cwd, log, what):
     with open(log, "w") as f:
         if subprocess.call(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=venv_env()):
             raise Fail("{} failed (see {})".format(what, log))
 
 def interrupts(con):
-    """/proc/interrupts' counts, by name."""
+    """/proc/interrupts' counts, by name. With a device tree, the controller's
+    domain adds the line (hwirq) after the chip's name."""
     out = con.command("cat /proc/interrupts", until=SHELL_PROMPT)
-    return {m.group(2): int(m.group(1)) for m in re.finditer(r"^\s*\d+:\s+(\d+)\s+\S+\s+(\S+)", out, re.M)}
+    return {m.group(2): int(m.group(1))
+            for m in re.finditer(r"^\s*\d+:\s+(\d+)\s+\S+\s+(?:\d+\s+)?(\S+)", out, re.M)}
 
 def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
@@ -113,12 +194,29 @@ def main():
         help="Seconds for each command of the set (default 1800, 7200 without the FPU). "
              "In the simulation, the two awk take 850 s on L7's BusyBox, longer on buildroot's; "
              "without the FPU, Lua's 2000-term loop takes 2800 s.")
+    parser.add_argument("--dtc",       default=None,
+        help="dtc, to give the kernel the SoC's device tree (L10; images.py --dtc). "
+             "Default: buildroot's host-dtc beside --linux-dir (<out>/host/bin/dtc) if there.")
+    parser.add_argument("--no-dtb",    action="store_true", help="No device tree, even with a dtc.")
+    parser.add_argument("--sdcard",    action="store_true",
+        help="Simulation: litex_sim's SD card (its emulator), and SIM_SD_COMMANDS.")
+    parser.add_argument("--io",        action="store_true",
+        help="Board: the Ethernet and SD card checks (io_checks; the SD card is overwritten).")
+    parser.add_argument("--host-ip",   default=None,
+        help="--io: this host's address the board reaches (default: on its default route).")
     parser.add_argument("--boot-timeout", default=3600, type=float,
         help="Seconds from litexboot to the shell (the simulation takes tens of minutes).")
     args = parser.parse_args()
     if args.command_timeout is None:
         args.command_timeout = 1800 if "fpu" in args.variant else 7200
     sys_clk = args.sys_clk if args.sys_clk is not None else (0 if args.serial else 100e6)
+    dtc = args.dtc
+    if dtc is None:
+        dtc = os.path.join(os.path.dirname(os.path.abspath(args.linux_dir)), "host", "bin", "dtc")
+        dtc = dtc if os.path.exists(dtc) else None
+    if args.no_dtb:
+        dtc = None
+    sim_extra = ["--with-sdcard"] if args.sdcard else []
 
     build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant, "l7"))
     out = os.path.join(build, "l7")
@@ -127,7 +225,8 @@ def main():
     try:
         # 1. litexboot and the images, against the SoC's software.
         if not args.serial:
-            run(sim_command(args.variant, build, 0, ["--no-compile-gateware"], main_ram=args.main_ram),
+            run(sim_command(args.variant, build, 0, ["--no-compile-gateware"] + sim_extra,
+                            main_ram=args.main_ram),
                 build, os.path.join(out, "software.log"), "the SoC's software")
         lb = os.path.join(out, "litexboot")
         os.makedirs(lb, exist_ok=True)
@@ -138,6 +237,7 @@ def main():
              "--vmlinux", os.path.join(args.linux_dir, "vmlinux"),
              "--initramfs", os.path.join(args.linux_dir, "initramfs.cpio.gz"),
              "--loader", os.path.join(lb, "litexboot.bin"), "--sys-clk", str(sys_clk),
+             *(["--dtc", dtc] if dtc else []),
              "--out-dir", images], out, os.path.join(out, "images.log"), "images.py")
         images_json = os.path.join(images, "images.json")
 
@@ -168,7 +268,7 @@ def main():
             check(re.search(r"Upload complete", got), "litex_term did not upload the images")
             print("\n[l7_test] upload: {:.0f} s".format(time.time() - t0), flush=True)
         else:
-            sim = start(sim_command(args.variant, build, args.port, ["--ram-init", images_json],
+            sim = start(sim_command(args.variant, build, args.port, ["--ram-init", images_json] + sim_extra,
                 main_ram=args.main_ram), open(os.path.join(build, "sim.log"), "w"))
             wait_listening(args.port, sim)
             con = socket_console(args.port, sys.stdout, sim)
@@ -177,6 +277,8 @@ def main():
         got = con.expect(r"litexboot: entry 0x[0-9a-f]+", 600)
         check("FPU 68881" in got if "fpu" in args.variant else "FPU none" in got,
               "litexboot: wrong FPU for the {} variant".format(args.variant))
+        check(("litexboot: device tree" in got) == bool(dtc),
+              "litexboot: device tree {}expected".format("" if dtc else "not "))
         t1 = time.time()
         if args.login:
             got = con.expect(r"login: ", args.boot_timeout)
@@ -209,8 +311,13 @@ def main():
         before = interrupts(con)
         fpu = "fpu" in args.variant
         libc = "/lib/libc.so.6" if fpu else "/lib/ld-musl-m68k-sf.so.1"
-        subst = dict(fpu="68881" if fpu else "none", libc=libc, libc_re=re.escape(libc))
-        for cmd, want in COMMANDS + (LOGIN_COMMANDS if args.login else []):
+        # The emulator's block: words 0 to 127, big-endian.
+        sd_block_md5 = hashlib.md5(b"".join(i.to_bytes(4, "big") for i in range(128))).hexdigest()
+        subst = dict(fpu="68881" if fpu else "none", libc=libc, libc_re=re.escape(libc),
+                     sd_block_md5=sd_block_md5)
+        commands = COMMANDS + (LOGIN_COMMANDS if args.login else []) + \
+            (DT_COMMANDS if dtc else []) + (SIM_SD_COMMANDS if args.sdcard else [])
+        for cmd, want in commands:
             cmd = cmd.replace("{libc}", libc)
             for k, v in subst.items():
                 want = want.replace("{" + k + "}", v)
@@ -219,6 +326,8 @@ def main():
             print("\n[l7_test] {:.0f} s".format(time.time() - t), flush=True)
             check(re.search(want, ans.replace(SHELL_PROMPT, ""), re.M),
                   "{!r} answered {!r}, expected {!r}".format(cmd, ans, want))
+        if args.io:
+            io_checks(con, args.command_timeout, args.host_ip or host_ip())
         after = interrupts(con)
         for name in ("timer0", "liteuart"):
             check(name in before and after.get(name, 0) > before[name],

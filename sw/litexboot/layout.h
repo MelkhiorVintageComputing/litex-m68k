@@ -10,10 +10,11 @@
 #define LAYOUT_ELF(base, size)      ((base) + (size) / 2)        /* vmlinux, as a file */
 #define LAYOUT_INITRD(base, size)   ((base) + (size) / 4 * 3)    /* initramfs */
 #define LAYOUT_PARAMS(base, size)   ((base) + (size) - 0x200000) /* struct params */
+#define LAYOUT_DTB(base, size)      ((base) + (size) - 0x180000) /* the device tree, kept by the kernel */
 #define LAYOUT_LOADER(base, size)   ((base) + (size) - 0x100000) /* litexboot; its stack above */
 
 #define PARAMS_MAGIC    0x4c584250  /* "LXBP" */
-#define PARAMS_VERSION  1
+#define PARAMS_VERSION  2
 #define PARAMS_CMDLINE  256
 
 /* Written by images.py, big-endian. */
@@ -24,6 +25,7 @@ struct params {
 	unsigned long sys_clk;  /* Hz told to the kernel; 0: the SoC's. A
 				   simulation says more than it runs at, so
 				   that ticks leave the CPU time to work */
+	unsigned long dtb_addr, dtb_size;         /* dtb_size 0: none */
 	char cmdline[PARAMS_CMDLINE];
 };
 

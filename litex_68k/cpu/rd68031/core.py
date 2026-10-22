@@ -70,7 +70,11 @@ FPU_CPID = 1
 IRQ_LEVEL = 2
 
 # Clocks (of the bus's domain) before an access nobody answers is a bus error.
-BUS_TIMEOUT = 1024
+# They include the wait for the bus: with the "fifo" bridge, the time-out is
+# before the SoC's arbiter, and a DMA master keeps the bus for as many reads
+# as its FIFO takes (LiteSDCard's, 16, each a DDR3 access with no L2 cache:
+# 1024 clocks were not enough, L10).
+BUS_TIMEOUT = 65536
 
 # Wishbone crossing between synchronous clocks ----------------------------------------------------
 

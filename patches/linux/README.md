@@ -33,9 +33,9 @@ and its RD68884 FPU, on a Wukong V3 or in litex_sim).
 - The usual places where a machine is listed: `bootinfo.h`, `setup.h`,
   `config.h`, `setup_mm.c`, `irq.h` (`NR_IRQS`), `Kbuild`, `Kconfig.machine`.
 
-The machine selects `OF` without using a device tree. That is only so that
-`SERIAL_LITEUART` (which `depends on OF`) can be built. LiteUART is then
-probed as a plain platform device, by name.
+The machine selects `OF` so that `SERIAL_LITEUART` (which `depends on OF`)
+can be built; without a device tree (0002), LiteUART is probed as a plain
+platform device, by name.
 
 **Why:** m68k Linux finds its devices through bootinfo records, per machine.
 LiteX's own Linux support is device tree based (RISC-V, or1k). Its DTS
@@ -44,3 +44,32 @@ for this CPU's interrupt CSRs.
 
 **Upstream:** not sent. Written so that it could be: the SoC's layout comes
 from the boot loader, and nothing is specific to RD68031.
+
+## 0002-m68k-litex-the-SoC-s-devices-from-a-device-tree.patch
+
+**What:** the SoC's devices from a flattened device tree that the boot loader
+passes (L10, `doc/l10-devicetree.md`).
+
+- `BI_LITEX_DTB` (0x8005): the blob's physical address and size. `config.c`
+  reserves it for good (the unflattened tree points into it) and, after
+  `paging_init`, `litex_init_dt()` verifies and unflattens it; the OF core then
+  creates the devices. `/memory` and `/chosen` are not read: the memory, the
+  command line and the initrd stay the bootinfo's.
+- `drivers/of/Kconfig`: `OF_EARLY_FLATTREE`, which holds
+  `unflatten_device_tree()`, excluded every m68k; now every m68k but this
+  machine.
+- `ints.c`: the tree's `"litex,m68k-intc"` node gets a legacy domain, so a
+  device's interrupt n is line n, Linux IRQ `IRQ_USER + n` as before. New
+  binding: `Documentation/devicetree/bindings/interrupt-controller/litex,m68k-intc.yaml`.
+- `timer.c`: `of_clk_init()`, for the tree's fixed clocks (LiteSDCard asks for
+  its clock); the machine selects `COMMON_CLK` and `IRQ_DOMAIN`.
+- `platform.c`: LiteUART from its bootinfo record only when the tree has no
+  node for it.
+
+Without `BI_LITEX_DTB`, nothing changes (L7's kernel and litexboot images).
+
+**Why:** LiteEth reads its buffer layout from its node's properties, and
+LiteSDCard its clock and regulator: they need a device tree. LiteX's
+`litex_json2dts_linux` makes one (with `patches/litex`'s m68k branch).
+
+**Upstream:** not sent; goes with 0001. A sign-off is needed.

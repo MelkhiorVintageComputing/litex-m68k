@@ -136,11 +136,15 @@ int main(void)
 	record64(BI_LITEX_CTRL, CSR_CTRL_BASE, 0);
 	record64(BI_LITEX_UART, CSR_UART_BASE, UART_INTERRUPT);
 	record64(BI_LITEX_TIMER0, CSR_TIMER0_BASE, TIMER0_INTERRUPT);
+	if (p->dtb_size)
+		record64(BI_LITEX_DTB, p->dtb_addr, p->dtb_size);
 	record(BI_LAST, NULL, 0);
 
 	printf("litexboot: bootinfo at 0x%08lx (%ld bytes), FPU %s, initrd 0x%08lx+0x%lx\n",
 	       (unsigned long)(MAIN_RAM_BASE + end), (long)(bi - (uint8_t *)(MAIN_RAM_BASE + end)),
 	       fpu ? "68881" : "none", p->initrd_addr, p->initrd_size);
+	if (p->dtb_size)
+		printf("litexboot: device tree 0x%08lx+0x%lx\n", p->dtb_addr, p->dtb_size);
 	printf("litexboot: command line \"%s\", sys clock %lu Hz\n", p->cmdline,
 	       p->sys_clk ? p->sys_clk : (unsigned long)CONFIG_CLOCK_FREQUENCY);
 	printf("litexboot: entry 0x%08lx\n", (unsigned long)(MAIN_RAM_BASE + eh->entry));

@@ -1,0 +1,54 @@
+From 98139d52463b9c36e526a2a1ccb52fd6106555e8 Mon Sep 17 00:00:00 2001
+From: Romain Dolbeau <romain@dolbeau.org>
+Date: Thu, 22 Oct 2026 09:58:33 +0200
+Subject: [PATCH] litex_json2dts_linux: add m68k
+
+A 68030-class CPU in a LiteX SoC (RD68031, cpu_family "m68k") takes its
+interrupts through a controller of its own: every SoC interrupt line on
+one autovectored level, with the lines' state in a pending CSR (+0x0) and
+the lines allowed to interrupt in a mask CSR (+0x4), the CPU's CSRs. Give
+it an intc0 node, "litex,m68k-intc", that the other nodes' interrupts
+refer to, and an initrd default as for the other families.
+
+m68k Linux takes its memory, command line and initrd from the boot
+loader's bootinfo, not from /memory and /chosen; the device tree gives it
+the SoC's devices.
+---
+ litex/tools/litex_json2dts_linux.py | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/litex/tools/litex_json2dts_linux.py b/litex/tools/litex_json2dts_linux.py
+index 733604f01..dd22a3c57 100755
+--- a/litex/tools/litex_json2dts_linux.py
++++ b/litex/tools/litex_json2dts_linux.py
+@@ -364,6 +364,7 @@ def generate_dts(d, initrd_start=None, initrd_size=None, initrd=None, root_devic
+ 
+     # Init Ram Disk.
+     default_initrd_start = {
++        "m68k":  16 * MEGABYTE,
+         "or1k":   8 * MEGABYTE,
+         "riscv": 16 * MEGABYTE,
+     }
+@@ -883,6 +884,19 @@ def generate_dts(d, initrd_start=None, initrd_size=None, initrd=None, root_devic
+                 status = "okay";
+             };
+ """
++
++    elif cpu_family == "m68k":
++        # The CPU's own controller: every SoC line on one autovectored level,
++        # with a pending (+0x0) and a mask (+0x4) CSR.
++        dts += """
++            intc0: interrupt-controller@{cpu_csr_base:x} {{
++                compatible = "litex,m68k-intc";
++                reg = <0x{cpu_csr_base:x} 0x8>;
++                interrupt-controller;
++                #interrupt-cells = <1>;
++                status = "okay";
++            }};
++""".format(cpu_csr_base=d["csr_bases"]["cpu"])
+     if (cpu_family == "riscv") and (cpu_name == "rocket"):
+         dts += """
+             dbg_ctl: debug-controller@0 {{
+-- 
+2.47.3
+
