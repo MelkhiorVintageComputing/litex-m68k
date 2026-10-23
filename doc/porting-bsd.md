@@ -497,6 +497,12 @@ device: halt in a loop.
     behind a long one, while the CPU waited) got "come again" forever, and
     the machine froze as soon as two processes using the FPU preempted each
     other (`doc/l7-linux.md`).
+  - **And from 7ec30da or later.** Before it, a conditional (FBcc, FScc,
+    FTRAPcc, FDBcc) waiting on a long instruction lost its answer if the
+    CPU took an interrupt during the wait and the handler's FSAVE came after
+    the FPU had answered: the frame was idle, and after FRESTORE the branch
+    went the wrong way. [observed] Under NetBSD, two processes looping on
+    libm's `log`, `exp` and `fmod` got NaN, 0 or inf now and then.
 - **Without an FPU:** the kernel must not run FSAVE/FRESTORE or any FPU
   instruction.
   - [observed] A kernel built for an FPU ran its context switch's FSAVE
