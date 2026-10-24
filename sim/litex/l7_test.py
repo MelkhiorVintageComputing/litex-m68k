@@ -132,7 +132,7 @@ class HTTPServer:
     def __exit__(self, *_):
         stop(self.proc)
 
-def io_checks(con, timeout, host, size=4 << 20):
+def io_checks(con, timeout, host, size=4 << 20, sd=True):
     """--io, a board with Ethernet and an SD card (L10, doc/l10-devicetree.md):
     a DHCP lease, ping and an HTTP download from this host (its md5), then the
     SD card overwritten: an ext2 filesystem, a file of random data written,
@@ -158,6 +158,8 @@ def io_checks(con, timeout, host, size=4 << 20):
     finally:
         shutil.rmtree(serve, ignore_errors=True)
 
+    if not sd:
+        return
     # The SD card: a 64 MiB filesystem at its start, whatever its size.
     sh("ls /sys/block/", r"mmcblk0", "SD card: no mmcblk0")
     sh("mkfs.ext2 -q /dev/mmcblk0 65536 && echo mkfs ok", r"^mkfs ok", "mkfs.ext2", 900)
@@ -318,6 +320,8 @@ def main():
         help="Simulation: litex_sim's SD card (its emulator), and SIM_SD_COMMANDS.")
     parser.add_argument("--io",        action="store_true",
         help="Board: the Ethernet and SD card checks (io_checks; the SD card is overwritten).")
+    parser.add_argument("--no-sd",     action="store_true",
+        help="--io: Ethernet only; the SD card is not touched (it holds something to keep).")
     parser.add_argument("--host-ip",   default=None,
         help="--io: this host's address the board reaches (default: on its default route).")
     parser.add_argument("--sd-install", action="store_true",
@@ -501,7 +505,7 @@ def main():
             sh("grep ' / ' /proc/mounts", r"^/dev/(root|mmcblk0p2) / ext2 rw", "root on the SD card")
             sh("cat /proc/cmdline", re.escape("root=" + SD_ROOT), "command line")
         if args.io:
-            io_checks(con, args.command_timeout, args.host_ip or host_ip())
+            io_checks(con, args.command_timeout, args.host_ip or host_ip(), sd=not args.no_sd)
         if args.sd_install:
             sd_install(con, args.command_timeout, args.host_ip or host_ip(), sd_boot_dir,
                        {"2": os.path.join(args.linux_dir, "rootfs.cpio"),

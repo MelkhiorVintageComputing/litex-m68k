@@ -34,6 +34,8 @@ but their FPUs have bugs (`doc/porting-bsd.md`):
 saved busy as the work run in between did, and
 `~/LITEX-68K/bitstreams/wukong-fpu-eth-sd/` (RD68884 7a188db) can also take a
 conditional branch the wrong way after a context switch.
+`~/LITEX-68K/bitstreams/wukong-nofpu-eth-sd-7c668f4/` is the same SoC without
+the FPU (`--bitstream` selects it), for software built for soft float.
 
 | | |
 |---|---|
@@ -116,13 +118,13 @@ driving the console: logging in, running commands, checking answers.
 
 ## The SD card
 
-- **Its current contents** (made by `l7_test.py --sd-install`,
-  `doc/l10-devicetree.md`):
-  - p1, FAT, 64 MiB: `boot.json`, the Linux kernel, `soc.dtb`, `params.bin`,
-    `litexboot.bin`, and `nofpu/vmlinux`;
-  - p2, ext2: a buildroot root filesystem for the FPU SoC;
-  - p3, ext2: one for the FPU-less SoC.
-- **While p1 holds a `boot.json`, every load boots Linux from the card**,
+- **Its current contents:** NetBSD's, in p1 and p2. The Linux filesystems
+  `l7_test.py --sd-install` made (`doc/l10-devicetree.md`) are gone; Linux
+  now boots from memory, by serial (`boot`, or `l7_test.py --serial`).
+  - Linux tests that must keep the card: `l7_test.py --io --no-sd`
+    (Ethernet only). Plain `--io`, `--sd-install` and `--sd-boot` overwrite
+    or need the Linux layout.
+- **While p1 holds a `boot.json`, every load boots from the card**,
   unless litex_term answers first (`boot` does). To get the BIOS prompt, use
   `board.py prompt`, which presses Q at "Press Q or ESC".
 - **Booting your own kernel from the card:** put it on p1 with its
