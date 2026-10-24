@@ -503,6 +503,12 @@ device: halt in a loop.
     the FPU had answered: the frame was idle, and after FRESTORE the branch
     went the wrong way. [observed] Under NetBSD, two processes looping on
     libm's `log`, `exp` and `fmod` got NaN, 0 or inf now and then.
+  - **And from 7c668f4 or later.** Before it, an instruction saved busy in
+    the middle of its operand transfer (a page fault on the operand's
+    second long word) rounded with the FPCR of whatever ran between FSAVE
+    and FRESTORE: another process, or a signal handler. [observed] Under
+    NetBSD, an FDIV.D faulting so while a signal handler rounded to zero
+    was rounded to zero every time.
 - **Without an FPU:** the kernel must not run FSAVE/FRESTORE or any FPU
   instruction.
   - [observed] A kernel built for an FPU ran its context switch's FSAVE

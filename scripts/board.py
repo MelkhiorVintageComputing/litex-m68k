@@ -23,7 +23,7 @@ each answered by --prompt.
 
 The bitstream and the SoC's software it goes with (headers, libraries,
 csr.json) are a snapshot directory (scripts/snapshot_bitstream.sh), by default
-~/LITEX-68K/bitstreams/wukong-fpu-eth-sd-7ec30da. Run from the project's venv
+~/LITEX-68K/bitstreams/wukong-fpu-eth-sd-7c668f4. Run from the project's venv
 (source ~/LITEX-68K/litex-venv/bin/activate)."""
 
 import argparse
@@ -41,7 +41,7 @@ sys.path[:0] = [os.path.join(TOP, "sim", "litex"), os.path.join(TOP, "targets")]
 from simtest import PROMPT, Fail, fd_console, serial_console, venv_env  # noqa: E402
 
 HOME = os.path.expanduser("~")
-DEFAULT_BITSTREAM = os.path.join(HOME, "LITEX-68K", "bitstreams", "wukong-fpu-eth-sd-7ec30da")
+DEFAULT_BITSTREAM = os.path.join(HOME, "LITEX-68K", "bitstreams", "wukong-fpu-eth-sd-7c668f4")
 DTC_CANDIDATES = [os.path.join(HOME, "LITEX-68K", "build", d, "host", "bin", "dtc")
                   for d in ("buildroot-fpu", "buildroot-nofpu")]
 

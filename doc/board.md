@@ -26,12 +26,14 @@ source ~/LITEX-68K/litex-venv/bin/activate     # every session: board.py and lit
 
 ## The current bitstream
 
-`~/LITEX-68K/bitstreams/wukong-fpu-eth-sd-7ec30da/`, a snapshot that later
+`~/LITEX-68K/bitstreams/wukong-fpu-eth-sd-7c668f4/`, a snapshot that later
 builds do not overwrite. Its `SNAPSHOT` file names the commits it was built
-from and its timing. It has RD68884 7ec30da; the older
-`~/LITEX-68K/bitstreams/wukong-fpu-eth-sd/` (RD68884 7a188db) is kept, but its
-FPU can take a conditional branch the wrong way after a context switch
-(`doc/porting-bsd.md`).
+from and its timing. It has RD68884 7c668f4. The older snapshots are kept,
+but their FPUs have bugs (`doc/porting-bsd.md`):
+`~/LITEX-68K/bitstreams/wukong-fpu-eth-sd-7ec30da/` can round an instruction
+saved busy as the work run in between did, and
+`~/LITEX-68K/bitstreams/wukong-fpu-eth-sd/` (RD68884 7a188db) can also take a
+conditional branch the wrong way after a context switch.
 
 | | |
 |---|---|
