@@ -68,7 +68,9 @@ int fpsw_tick(void)
 	return 1;
 }
 
-/* Long FPU instructions, so that switches find the FPU busy. */
+/* Long FPU instructions, so that switches find the FPU busy. The MC68040
+ * leaves FSIN to software (the M68040FPSP, UM 9.6.1): on RD68041, FDIV, also
+ * long there (RD68041 doc/timing-divergences.md). */
 static uint64_t __attribute__((noinline)) compute(void)
 {
 	long double x = 0.5L;
@@ -77,7 +79,11 @@ static uint64_t __attribute__((noinline)) compute(void)
 
 	for (int i = 0; i < 16; i++) {
 		long double s, r;
+#ifdef __rd68041__
+		__asm__ volatile ("fdiv.x %1, %0" : "=f" (s) : "f" (x + 3.0L), "0" (x));
+#else
 		__asm__ volatile ("fsin.x %1, %0" : "=f" (s) : "f" (x));
+#endif
 		__asm__ volatile ("fsqrt.x %1, %0" : "=f" (r) : "f" (x * x + 1.5L));
 		x = r / 1.0001L + s;
 	}
