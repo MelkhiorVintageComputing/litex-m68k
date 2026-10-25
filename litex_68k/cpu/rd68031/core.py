@@ -156,6 +156,44 @@ class WishboneErrorTimeout(LiteXModule):
             count.eq(0)
         )
 
+# The reset request in the CPU's clock domain ------------------------------------------------------
+
+def cpu_domain_reset(module, request, cd):
+    """The reset request `request` (sys) as clock domain `cd` sees it, added to
+    `module`. A request may be one sys clock long (ctrl's soc_rst), which a
+    slower CPU clock would miss: its start crosses as a toggle, and holds the
+    CPU in reset for RESET_CLOCKS of its own clocks; a longer request (cpu_rst)
+    crosses as it is too."""
+    reset = Signal()
+    if cd == "sys":
+        module.comb += reset.eq(request)
+        return reset
+    RESET_CLOCKS = 8
+    reset_q  = Signal()
+    toggle   = Signal(reset_less=True)
+    level    = Signal()
+    seen     = Signal()
+    seen_q   = Signal()
+    count    = Signal(max=RESET_CLOCKS + 1)
+    module.sync += [
+        reset_q.eq(request),
+        If(request & ~reset_q, toggle.eq(~toggle)),
+    ]
+    module.specials += [
+        MultiReg(request, level, cd),
+        MultiReg(toggle,  seen,  cd),
+    ]
+    getattr(module.sync, cd).__iadd__([
+        seen_q.eq(seen),
+        If(seen != seen_q,
+            count.eq(RESET_CLOCKS)
+        ).Elif(count != 0,
+            count.eq(count - 1)
+        ),
+    ])
+    module.comb += reset.eq(level | (count != 0))
+    return reset
+
 # RD68031 ------------------------------------------------------------------------------------------
 
 class RD68031(CPU):
@@ -237,39 +275,7 @@ class RD68031(CPU):
         self.comb += self.irq_pending.status.eq(self.interrupt)
         self.sync += ipl.eq(Mux((self.interrupt & self.irq_mask.storage) != 0, IRQ_LEVEL, 0))
 
-        # The reset request (sys) as the CPU's clock domain sees it. A request
-        # may be one sys clock long (ctrl's soc_rst), which a slower CPU clock
-        # would miss: its start crosses as a toggle, and holds the CPU in reset
-        # for RESET_CLOCKS of its own clocks; a longer request (cpu_rst)
-        # crosses as it is too.
-        reset = Signal()
-        if cd == "sys":
-            self.comb += reset.eq(self.reset)
-        else:
-            RESET_CLOCKS = 8
-            reset_q  = Signal()
-            toggle   = Signal(reset_less=True)
-            level    = Signal()
-            seen     = Signal()
-            seen_q   = Signal()
-            count    = Signal(max=RESET_CLOCKS + 1)
-            self.sync += [
-                reset_q.eq(self.reset),
-                If(self.reset & ~reset_q, toggle.eq(~toggle)),
-            ]
-            self.specials += [
-                MultiReg(self.reset, level, cd),
-                MultiReg(toggle,     seen,  cd),
-            ]
-            getattr(self.sync, cd).__iadd__([
-                seen_q.eq(seen),
-                If(seen != seen_q,
-                    count.eq(RESET_CLOCKS)
-                ).Elif(count != 0,
-                    count.eq(count - 1)
-                ),
-            ])
-            self.comb += reset.eq(level | (count != 0))
+        reset = cpu_domain_reset(self, self.reset, cd)
 
         # The bus as the core sees it: the bridge's, and with the FPU, the FPU's
         # data lanes when it drives them and its DSACK, wired-OR (active low).

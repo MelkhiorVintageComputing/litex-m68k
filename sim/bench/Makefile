@@ -3,38 +3,62 @@
 
 # L1 bench: RD68031 + M68030ToWishbone, no LiteX SoC (doc/plan.md, L1).
 #
-#   make check          every program, both cache configurations
+#   make check          every program
 #   make run PROG=x     one program (bustest, arith)
 #   make CACHES=0 ...   the core built with no caches (ICACHE/DCACHE_ENTRIES=0)
 #   make BRIDGE=fifo ...  M68030ToFIFOToSoC, the processor on a clock of its own
 #                       (PLUSARGS=+cpu_half=<ns> sets it; sys's is 5)
+#   make CPU=rd68041 ...  RD68041 (an MC68040) behind M68040ToFIFOToSoC, on a
+#                       clock of its own as with BRIDGE=fifo; FPU=0 for the
+#                       MC68LC040 (L11, programs040/)
 #
 # Needs the venv (scripts/setup_venv.sh) and ../pythondata-cpu-rd68031
-# (scripts/sync_pythondata.sh). The Verilator build of the core is a heavy job:
-# run it alone (CLAUDE.md).
+# (scripts/sync_pythondata.sh), or ../pythondata-cpu-rd68041
+# (scripts/sync_pythondata_rd68041.sh). The Verilator build of the core is a
+# heavy job: run it alone (CLAUDE.md).
 
 TOP     := $(abspath ../..)
 CROSS   ?= m68k-linux-gnu-
 PYTHON  ?= $(HOME)/LITEX-68K/litex-venv/bin/python
+CPU     ?= rd68031
 CACHES  ?= 64
 BRIDGE  ?= wishbone
+FPU     ?= 1
+
+ifeq ($(CPU),rd68041)
+BUILD   := build/rd68041-fpu$(FPU)
+PROGDIR := build/programs040
+PROGSRC := programs040
+CORE_V  := $(abspath $(TOP)/../pythondata-cpu-rd68041/pythondata_cpu_rd68041/verilog)
+CORE_SRCS := $(addprefix $(CORE_V)/,$(shell cat $(CORE_V)/rd68041.f))
+CORE_VLT  := $(CORE_V)/rtl/rd68041.vlt
+BRIDGE_SRCS := $(TOP)/litex_68k/m68040_bus.py $(TOP)/litex_68k/m68k_fifo.py $(TOP)/litex_68k/cpu/rd68031/core.py
+BENCH_ARGS  := --cpu rd68041 --fpu $(FPU)
+VDEFS   := -DFIFO_BRIDGE -DRD68041
+MCPU    := -mcpu=68040 -msoft-float
+else
 BUILD   := build/$(BRIDGE)-caches$(CACHES)
 PROGDIR := build/programs
-
-RD68031_V := $(abspath $(TOP)/../pythondata-cpu-rd68031/pythondata_cpu_rd68031/verilog)
-RD68031_SRCS := $(addprefix $(RD68031_V)/,$(shell cat $(RD68031_V)/rd68031.f))
-BRIDGE_SRCS := $(TOP)/litex_68k/m68030_bus.py $(TOP)/litex_68k/m68030_fifo.py $(TOP)/litex_68k/cpu/rd68031/core.py
+PROGSRC := programs
+CORE_V  := $(abspath $(TOP)/../pythondata-cpu-rd68031/pythondata_cpu_rd68031/verilog)
+CORE_SRCS := $(addprefix $(CORE_V)/,$(shell cat $(CORE_V)/rd68031.f))
+CORE_VLT  := $(CORE_V)/rtl/rd68031.vlt
+BRIDGE_SRCS := $(TOP)/litex_68k/m68030_bus.py $(TOP)/litex_68k/m68030_fifo.py $(TOP)/litex_68k/m68k_fifo.py $(TOP)/litex_68k/cpu/rd68031/core.py
+BENCH_ARGS  := --icache $(CACHES) --dcache $(CACHES) --bridge $(BRIDGE)
 VDEFS   := $(if $(filter fifo,$(BRIDGE)),-DFIFO_BRIDGE)
+MCPU    := -mcpu=68030
+endif
+CONFIG  := $(if $(filter rd68041,$(CPU)),rd68041 fpu=$(FPU),$(BRIDGE) caches=$(CACHES))
 
 # Programs, and the RESULT each must write.
 PROGS          := bustest arith
-EXPECT_bustest := 00000000
+EXPECT_bustest := $(if $(filter rd68041,$(CPU)),0040600d,00000000)
 # arith.c's main() as a 32-bit x86 build computes it, with no m68k in the loop:
 # see doc/l1-bench.md.
 EXPECT_arith   := 688cea90
 
-CFLAGS  := -mcpu=68030 -O2 -ffreestanding -fno-builtin -fomit-frame-pointer
-ASFLAGS := -mcpu=68030 -Iprograms
+CFLAGS  := $(MCPU) -O2 -ffreestanding -fno-builtin -fomit-frame-pointer
+ASFLAGS := $(MCPU) -I$(PROGSRC)
 LDFLAGS := -nostdlib -nostartfiles -Wl,--build-id=none,--no-warn-rwx-segments -T programs/bench.ld
 
 .PHONY: check run clean
@@ -42,7 +66,7 @@ LDFLAGS := -nostdlib -nostartfiles -Wl,--build-id=none,--no-warn-rwx-segments -T
 
 check: $(BUILD)/Vtb $(addprefix $(PROGDIR)/,$(addsuffix .hex,$(PROGS)))
 	@fail=0; for p in $(PROGS); do \
-	    printf '%-8s %s caches=%-3s ' $$p $(BRIDGE) $(CACHES); \
+	    printf '%-8s %-22s ' $$p "$(CONFIG)"; \
 	    if $(MAKE) --no-print-directory -s run PROG=$$p > $(BUILD)/$$p.log 2>&1; \
 	    then grep -h '^EXIT' $(BUILD)/$$p.log | sed 's/^EXIT [0-9a-f]* after/PASS,/'; \
 	    else echo "FAIL (see sim/bench/$(BUILD)/$$p.log)"; fail=1; fi; \
@@ -54,16 +78,16 @@ run: $(BUILD)/Vtb $(PROGDIR)/$(PROG).hex
 # The bench's Verilog, then the simulator.
 $(BUILD)/bench.v: bench.py $(BRIDGE_SRCS)
 	@mkdir -p $(BUILD)
-	$(PYTHON) bench.py --output $@ --icache $(CACHES) --dcache $(CACHES) --bridge $(BRIDGE)
+	$(PYTHON) bench.py --output $@ $(BENCH_ARGS)
 
-$(BUILD)/Vtb: tb.sv $(BUILD)/bench.v $(RD68031_SRCS)
+$(BUILD)/Vtb: tb.sv $(BUILD)/bench.v $(CORE_SRCS)
 	verilator --binary --timing -j 4 -Wno-fatal -Wno-lint -Wno-style $(VDEFS) \
 	    --top-module tb --Mdir $(BUILD)/obj -o ../Vtb \
-	    $(RD68031_V)/rtl/rd68031.vlt $(RD68031_SRCS) $(BUILD)/bench.v tb.sv \
+	    $(CORE_VLT) $(CORE_SRCS) $(BUILD)/bench.v tb.sv \
 	    > $(BUILD)/verilator.log 2>&1 || { tail -30 $(BUILD)/verilator.log; exit 1; }
 
 # Programs: an ELF, then one big-endian 32-bit word per line for $readmemh.
-$(PROGDIR)/%.o: programs/%.S programs/bench.inc
+$(PROGDIR)/%.o: $(PROGSRC)/%.S $(PROGSRC)/bench.inc
 	@mkdir -p $(PROGDIR)
 	$(CROSS)gcc $(ASFLAGS) -c -o $@ $<
 

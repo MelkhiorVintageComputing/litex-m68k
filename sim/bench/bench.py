@@ -6,7 +6,10 @@
 
 Generates bench.v, the top that tb.sv instantiates. With --bridge fifo, the
 bridge is M68030ToFIFOToSoC instead (litex_68k/m68030_fifo.py), the processor
-on a clock of its own ("cpu"), unrelated to sys, where everything else is. The map:
+on a clock of its own ("cpu"), unrelated to sys, where everything else is.
+With --cpu rd68041, the processor is RD68041 (an MC68040; --fpu 0, the
+MC68LC040) behind M68040ToFIFOToSoC (litex_68k/m68040_bus.py), on its own
+clock as with --bridge fifo. The map:
 
     $0000_0000  RAM (--ram-size), loaded at run time from the file named by the
                 +ram= plusarg (one 32-bit big-endian word per line, $readmemh)
@@ -16,7 +19,7 @@ on a clock of its own ("cpu"), unrelated to sys, where everything else is. The m
                 times out and asserts BERR
 
 $8000_0000-$FFFF_FFFF is the I/O region, as in the LiteX SoC: the bridge asserts
-CIIN there, and M68030ToFIFO does not post writes there.
+CIIN there (the 040's: TCI), and the FIFO bridges do not post writes there.
 
 The test device, word registers:
 
@@ -42,6 +45,7 @@ from litex.build.sim.common import sim_special_overrides
 
 from litex_68k.m68030_bus import m68030_bus_layout, M68030ToWishbone
 from litex_68k.m68030_fifo import M68030ToFIFOToSoC
+from litex_68k.m68040_bus import m68040_bus_layout, M68040ToFIFOToSoC
 from litex_68k.cpu.rd68031.core import WishboneErrorTimeout
 
 # Test device --------------------------------------------------------------------------------------
@@ -101,26 +105,9 @@ class ErrorSlave(LiteXModule):
 
 # Bench --------------------------------------------------------------------------------------------
 
-class Bench(LiteXModule):
-    def __init__(self, ram_size=0x40000, icache=64, dcache=64, timeout=256, bridge="wishbone"):
-        self.cd_sys = ClockDomain()
-        cd = "sys"
-        if bridge == "fifo":
-            self.cd_cpu = ClockDomain()
-            cd = "cpu"
-
-        # # #
-
-        bus = Record(m68030_bus_layout)
-        io_regions = {0x8000_0000: 0x8000_0000}  # As LiteX's, for RD68031.
-        if bridge == "fifo":
-            wb = wishbone.Interface(data_width=32, address_width=32, addressing="word")
-            self.bridge  = M68030ToFIFOToSoC(bus, wb, cd=cd, io_regions=io_regions)
-            master = wishbone.Interface(data_width=32, address_width=32, addressing="word")
-            self.timeout = WishboneErrorTimeout(wb, master, timeout)
-        else:
-            self.bridge = M68030ToWishbone(bus, io_regions=io_regions, timeout=timeout)
-            master = self.bridge.wishbone
+class BenchBase(LiteXModule):
+    def add_soc(self, master, ram_size):
+        """The RAM, the test devices and the decoder, behind `master` (in sys)."""
         self.dev    = dev = BenchDevice()
         self.err    = ErrorSlave()
 
@@ -152,6 +139,29 @@ class Bench(LiteXModule):
         self.result_stb = dev.result_stb
         self.result     = dev.result
 
+
+class Bench(BenchBase):
+    def __init__(self, ram_size=0x40000, icache=64, dcache=64, timeout=256, bridge="wishbone"):
+        self.cd_sys = ClockDomain()
+        cd = "sys"
+        if bridge == "fifo":
+            self.cd_cpu = ClockDomain()
+            cd = "cpu"
+
+        # # #
+
+        bus = Record(m68030_bus_layout)
+        io_regions = {0x8000_0000: 0x8000_0000}  # As LiteX's, for RD68031.
+        if bridge == "fifo":
+            wb = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.bridge  = M68030ToFIFOToSoC(bus, wb, cd=cd, io_regions=io_regions)
+            master = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+            self.timeout = WishboneErrorTimeout(wb, master, timeout)
+        else:
+            self.bridge = M68030ToWishbone(bus, io_regions=io_regions, timeout=timeout)
+            master = self.bridge.wishbone
+        self.add_soc(master, ram_size)
+
         # The processor.
         reset_n_oe = Signal()
         self.specials += Instance("rd68031_top",
@@ -179,7 +189,7 @@ class Bench(LiteXModule):
             o_ciout_n_o  = bus.ciout_n,  o_ciout_oe = Open(),
             o_cbreq_n_o  = bus.cbreq_n,  o_cbreq_oe = Open(),
             i_cback_n_i  = bus.cback_n,
-            i_ipl_n_i    = ~dev.ipl,
+            i_ipl_n_i    = ~self.dev.ipl,
             o_ipend_n_o  = Open(),
             i_avec_n_i   = bus.avec_n,
             i_br_n_i     = 1,
@@ -198,6 +208,72 @@ class Bench(LiteXModule):
             o_status_n_o = Open(),
         )
 
+class Bench040(BenchBase):
+    """RD68041 behind M68040ToFIFOToSoC, the processor on clock domain "cpu"."""
+    def __init__(self, ram_size=0x40000, fpu=1, timeout=256):
+        self.cd_sys = ClockDomain()
+        self.cd_cpu = ClockDomain()
+
+        # # #
+
+        bus = Record(m68040_bus_layout)
+        io_regions = {0x8000_0000: 0x8000_0000}  # As LiteX's.
+        wb = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+        self.bridge  = M68040ToFIFOToSoC(bus, wb, cd="cpu", io_regions=io_regions)
+        master = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+        self.timeout = WishboneErrorTimeout(wb, master, timeout)
+        self.add_soc(master, ram_size)
+
+        # The processor, the only master: the bus granted to it for good, no
+        # snooping (SC = 00, UM Table 4-1), and its bidirectional pins' inputs
+        # fed from its own outputs while it drives them, as on a board.
+        ts_n_o, ts_oe, bb_n_o, bb_oe = Signal(), Signal(), Signal(), Signal()
+        self.comb += bus.ts_n.eq(~ts_oe | ts_n_o)
+        self.specials += Instance("rd68041_top",
+            p_FPU        = fpu,
+            i_clk        = ClockSignal("cpu"),
+            i_pclk       = 0,
+            i_rst_n      = ~ResetSignal("cpu"),
+            i_rsti_n_i   = ~ResetSignal("cpu"),
+            o_rsto_n_o   = Open(),
+            i_a_i        = bus.a,        o_a_o      = bus.a,      o_a_oe     = Open(),
+            i_d_i        = bus.d_r,      o_d_o      = bus.d_w,    o_d_oe     = Open(),
+            i_tt_i       = bus.tt,       o_tt_o     = bus.tt,
+            o_tm_o       = bus.tm,
+            o_tln_o      = Open(),
+            o_upa_o      = Open(),
+            i_rw_i       = bus.rw,       o_rw_o     = bus.rw,
+            i_siz_i      = bus.siz,      o_siz_o    = bus.siz,
+            o_lock_n_o   = bus.lock_n,
+            o_locke_n_o  = Open(),
+            o_ciout_n_o  = bus.ciout_n,
+            o_attr_oe    = Open(),
+            i_ts_n_i     = bus.ts_n,     o_ts_n_o   = ts_n_o,     o_ts_oe    = ts_oe,
+            o_tip_n_o    = bus.tip_n,    o_tip_oe   = Open(),
+            i_ta_n_i     = bus.ta_n,     o_ta_n_o   = Open(),     o_ta_oe    = Open(),
+            i_tea_n_i    = bus.tea_n,
+            i_tci_n_i    = bus.tci_n,
+            i_tbi_n_i    = bus.tbi_n,
+            i_dle_i      = 0,
+            i_sc_i       = 0b00,
+            o_mi_n_o     = Open(),
+            o_br_n_o     = Open(),
+            i_bg_n_i     = 0,
+            i_bb_n_i     = ~bb_oe | bb_n_o, o_bb_n_o = bb_n_o,    o_bb_oe    = bb_oe,
+            i_cdis_n_i   = 1,
+            i_mdis_n_i   = 1,
+            i_ipl_n_i    = ~self.dev.ipl,
+            o_ipend_n_o  = Open(),
+            i_avec_n_i   = bus.avec_n,
+            o_pst_o      = Open(),
+            i_tck_i      = 0,
+            i_tms_i      = 1,
+            i_tdi_i      = 1,
+            i_trst_n_i   = 0,
+            o_tdo_o      = Open(),
+            o_tdo_oe     = Open(),
+        )
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
@@ -208,9 +284,16 @@ def main():
     parser.add_argument("--dcache",   default=64, type=int, help="DCACHE_ENTRIES (0: no data cache).")
     parser.add_argument("--bridge",   default="wishbone", choices=["wishbone", "fifo"],
                         help="M68030ToWishbone, or M68030ToFIFOToSoC with the CPU on a clock of its own.")
+    parser.add_argument("--cpu",      default="rd68031", choices=["rd68031", "rd68041"],
+                        help="The processor; rd68041 is always behind its FIFO bridge.")
+    parser.add_argument("--fpu",      default=1, type=int, help="RD68041's FPU parameter (0: MC68LC040).")
     args = parser.parse_args()
 
-    bench = Bench(ram_size=args.ram_size, icache=args.icache, dcache=args.dcache, bridge=args.bridge)
+    if args.cpu == "rd68041":
+        args.bridge = "fifo"
+        bench = Bench040(ram_size=args.ram_size, fpu=args.fpu)
+    else:
+        bench = Bench(ram_size=args.ram_size, icache=args.icache, dcache=args.dcache, bridge=args.bridge)
     ios = {
         bench.cd_sys.clk, bench.cd_sys.rst,
         bench.tty_stb, bench.tty_data,

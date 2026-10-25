@@ -11,6 +11,8 @@
 //   +vcd=<file>      dump a VCD
 //   +cpu_half=<ns>   with FIFO_BRIDGE defined (bench.py --bridge fifo): half the
 //                    period of the processor's clock (default 17.3; sys: 5)
+//   +trace           with RD68041 defined (bench.py --cpu rd68041): every
+//                    transfer's start, and every long word's TA, on the console
 //
 // The verdict is the last line: "PASS", or "FAIL: <why>". Exit status 0 for PASS.
 
@@ -30,6 +32,18 @@ module tb;
     always #(cpu_half) cpu_clk = ~cpu_clk;
 `endif
 
+`ifdef RD68041
+    logic trace;
+    initial trace = $test$plusargs("trace");
+    always @(posedge cpu_clk) if (trace) begin
+        if (!dut.bench040_bus_ts_n)
+            $display("TS  a=%08x siz=%0d rw=%0d tt=%0d tm=%0d", dut.bench040_bus_a,
+                     dut.bench040_bus_siz, dut.bench040_bus_rw, dut.bench040_bus_tt, dut.bench040_bus_tm);
+        if (!dut.bench040_bus_ta_n)
+            $display("TA  d=%08x/%08x", dut.bench040_bus_d_r, dut.bench040_bus_d_w);
+    end
+`endif
+
     bench dut (
         .sys_clk(clk), .sys_rst(rst),
 `ifdef FIFO_BRIDGE
@@ -40,7 +54,8 @@ module tb;
         .result_stb(result_stb), .result(result)
     );
 
-    // RD68031 needs a 50 % duty cycle: both edges are bus states.
+    // RD68031 needs a 50 % duty cycle: both edges are bus states (RD68041: only
+    // the rising edge).
     always #5 clk = ~clk;
 
     string       ram_file, vcd_file;
