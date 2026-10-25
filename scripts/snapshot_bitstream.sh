@@ -26,12 +26,14 @@ cp -r "$SRC/software" "$DST/software"
 sed -i "s|^BUILDINC_DIRECTORY=.*|BUILDINC_DIRECTORY=$DST/software/include|" \
     "$DST/software/include/generated/variables.mak"
 
+CPU=$(sed -n 's/^constant,config_cpu_name,\(.*\),,$/\1/p' "$SRC/csr.csv")
 {
 	echo "source:              $SRC"
 	echo "copied:              $(date -Iseconds)"
 	echo "litex-68k (at copy): $(git -C "$HERE" describe --always --dirty)"
 	echo "litex (copy):        $(git -C "$HOME/LITEX-68K/litex" describe --always --dirty 2>/dev/null || echo '~/LITEX/litex')"
-	echo "pythondata:          $(git -C "$HERE/../pythondata-cpu-rd68031" describe --always --dirty)"
+	echo "cpu:                 $CPU"
+	echo "pythondata:          $(git -C "$HERE/../pythondata-cpu-$CPU" describe --always --dirty)"
 	echo "identifier:          $(sed -n 's/^constant,config_identifier,\(.*\),,$/\1/p' "$SRC/csr.csv")"
 	echo "timing:              WNS $(grep -A6 'Design Timing Summary' "$SRC/gateware/qmtech_wukong_timing.rpt" | tail -1 | awk '{print $1}') ns"
 } > "$DST/SNAPSHOT"

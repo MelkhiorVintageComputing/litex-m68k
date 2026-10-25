@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright 2026 Romain Dolbeau
 
-"""RD68031 on the QMTech Wukong (xc7a100t), from litex-boards' target.
+"""RD68031 (or RD68041) on the QMTech Wukong (xc7a100t), from litex-boards' target.
 
     targets/qmtech_wukong.py --build             # Vivado: a heavy job, run it alone
     targets/qmtech_wukong.py --load              # into the FPGA over JTAG (not the flash)
@@ -25,6 +25,11 @@ Two configurations (doc/l5-wukong.md):
 
 --cpu-variant standard+fpu adds the RD68884 FPU (core.py).
 
+--cpu-type rd68041: RD68041 (L11-L17), an MC68LC040, or with --cpu-variant
+standard+fpu an MC68040. Always the FIFO bridge (litex_68k/m68040_bus.py),
+the CPU at --cpu-clk-freq (25 MHz by default) from an MMCM of its own, as
+above; output build/qmtech_wukong_rd68041.
+
 --with-ethernet and --with-sdcard are litex-boards' (L10, doc/l10-devicetree.md).
 With the SD card, the L2 cache is off (--l2-size 0) unless asked for: the CPU
 reaches the DDR3 on a native port of its own (L6), the SD card's DMA through
@@ -33,7 +38,7 @@ and hand the DMA stale lines.
 
 Defaults that differ from litex-boards': --cpu-type rd68031, --revision 3,
 --timer-uptime, the clocks above, and the output directory, in this repository.
---bus-bridge (fifo or sync, RD68031.bus_bridge) is ours.
+--bus-bridge (fifo or sync, RD68031.bus_bridge; RD68031 only) is ours.
 --load uses Vivado's hardware manager (the board's JTAG here is a Xilinx
 Platform Cable, which litex-boards' OpenOCD configuration does not drive).
 """
@@ -49,6 +54,7 @@ from litex.soc.cores.clock import S7MMCM
 
 from litex_68k.cpu import register
 from litex_68k.cpu.rd68031.core import RD68031
+from litex_68k.cpu.rd68041.core import RD68041
 
 TOP = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 VIVADO_SETTINGS = os.environ.get("LITEX_ENV_VIVADO", "/opt/Xilinx/2025.2/Vivado")
@@ -90,7 +96,7 @@ def get_option(argv, opt, default=None, remove=False):
             return a.split("=", 1)[1]
     return default
 
-def crg(qmtech_wukong, cpu_clk_freq=None):
+def crg(qmtech_wukong, cpu_clk_freq=None, fifo=True):
     """litex-boards' CRG, with a reset request that its MMCM sees, and, given
     cpu_clk_freq, a "cpu" clock domain from one more output of its MMCM.
 
@@ -130,7 +136,7 @@ def crg(qmtech_wukong, cpu_clk_freq=None):
 
             if cpu_clk_freq is not None:
                 self.cd_cpu = ClockDomain()
-                if RD68031.bus_bridge == "fifo":
+                if fifo:
                     # An MMCM of its own, from the same 50 MHz and the same
                     # reset: the main MMCM's outputs stay litex-boards' (sys
                     # and the DDR3's 4x), and the CPU's clock is any its VCO
@@ -150,10 +156,11 @@ def crg(qmtech_wukong, cpu_clk_freq=None):
                     self.pll.create_clkout(self.cd_cpu, cpu_clk_freq)
     qmtech_wukong._CRG = _CRG
 
-def cpu_clock_domain(qmtech_wukong, cpu_clk_freq):
-    """RD68031 in a "cpu" clock domain, one more output of litex-boards' main MMCM."""
-    crg(qmtech_wukong, cpu_clk_freq)
-    RD68031.clock_domain = "cpu"
+def cpu_clock_domain(qmtech_wukong, cpu_clk_freq, cpu):
+    """The CPU (class `cpu`) in a "cpu" clock domain, from an MMCM of its own
+    with the FIFO bridge, else one more output of litex-boards' main MMCM."""
+    crg(qmtech_wukong, cpu_clk_freq, getattr(cpu, "bus_bridge", "fifo") == "fifo")
+    cpu.clock_domain = "cpu"
 
 def main():
     register()
@@ -165,18 +172,25 @@ def main():
     # --load is ours: litex-boards' would run OpenOCD.
     load = "--load" in argv
     argv = [a for a in argv if a != "--load"]
-    RD68031.bus_bridge = get_option(argv, "--bus-bridge", RD68031.bus_bridge, remove=True)
-    # 30 MHz on a clock of its own with the FIFO bridge (doc/l6-fpu.md); 25 MHz,
-    # a quarter of sys, with "sync".
+    cpu_type = get_option(argv, "--cpu-type", "rd68031")
+    cpu = RD68041 if cpu_type == "rd68041" else RD68031
+    if cpu is RD68031:
+        RD68031.bus_bridge = get_option(argv, "--bus-bridge", RD68031.bus_bridge, remove=True)
+    bridge = getattr(cpu, "bus_bridge", "fifo")
+    # RD68031: 30 MHz on a clock of its own with the FIFO bridge
+    # (doc/l6-fpu.md); 25 MHz, a quarter of sys, with "sync". RD68041: 25 MHz
+    # to start with (it makes about 30 out of context).
     cpu_clk_freq = float(get_option(argv, "--cpu-clk-freq",
-        "30e6" if RD68031.bus_bridge == "fifo" else "25e6", remove=True))
+        "30e6" if cpu is RD68031 and bridge == "fifo" else "25e6", remove=True))
     ddr3 = get_option(argv, "--integrated-main-ram-size") is None
     name = "qmtech_wukong" if ddr3 else "qmtech_wukong_bram"
-    if RD68031.bus_bridge != "fifo":
-        name += "_" + RD68031.bus_bridge
+    if cpu is RD68041:
+        name += "_rd68041"
+    if bridge != "fifo":
+        name += "_" + bridge
 
     defaults = [
-        ("--cpu-type",     "rd68031"),
+        ("--cpu-type",     cpu_type),
         ("--revision",     "3"),
         ("--sys-clk-freq", "100e6" if ddr3 else str(cpu_clk_freq)),
         ("--output-dir",   os.path.join(TOP, "build", name)),
@@ -193,12 +207,12 @@ def main():
     from litex_boards.targets import qmtech_wukong
     sys_clk_freq = float(get_option(argv, "--sys-clk-freq"))
     if sys_clk_freq != cpu_clk_freq:
-        if RD68031.bus_bridge == "sync":
+        if bridge == "sync":
             # WishboneSyncCrossing (core.py) needs the CPU's clock to be sys's
             # divided by an integer.
             ratio = sys_clk_freq / cpu_clk_freq
             assert ratio == int(ratio), "--sys-clk-freq must be a multiple of --cpu-clk-freq"
-        cpu_clock_domain(qmtech_wukong, cpu_clk_freq)
+        cpu_clock_domain(qmtech_wukong, cpu_clk_freq, cpu)
     else:
         crg(qmtech_wukong)
     qmtech_wukong.main()

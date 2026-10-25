@@ -81,6 +81,7 @@ def main():
     parser.add_argument("--serial",    default=None,
         help="A board's serial port (e.g. /dev/ttyUSB0) instead of the simulation: the board runs "
              "the SoC built in --build-dir, its BIOS at the prompt; the programs go to <build-dir>/l4.")
+    parser.add_argument("--speed",     default=115200, type=int, help="Board: the UART's baud rate.")
     args = parser.parse_args()
 
     build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant, sim_build_name(args, "l4")))
@@ -98,7 +99,7 @@ def main():
         shutil.copy(demo, boot)
 
         if args.serial:
-            port, options = args.serial, []
+            port, options = args.serial, ["--speed", str(args.speed)]
         else:
             sim = start(sim_command(args.variant, build, args.port, sim_options(args)), open(os.path.join(build, "sim.log"), "w"))
             wait_listening(args.port, sim)
