@@ -1,9 +1,9 @@
 # LiteX-68K
 
 m68k CPUs in the LiteX SoC builder: soft-cores in the FPGA first (RD68031, an
-MC68030, and optionally its RD68884 FPU), real hard CPUs on FPGA pins later, with the
+MC68030, and optionally its RD68884 FPU; RD68041, an MC68040 or MC68LC040), real hard CPUs on FPGA pins later, with the
 LiteX BIOS and bare-metal code as the first goal and buildroot Linux after it. The
-milestones (L0-L10) and the design decisions are in `doc/plan.md`.
+milestones (L0-L10 for RD68031, L11-L17 for RD68041) and the design decisions are in `doc/plan.md`.
 
 ## Hard rules
 
@@ -29,6 +29,13 @@ then prefers that copy. The copies are disposable; the patches are what is kept.
 are oracles, never sources — do not open them when writing RTL. Our bridge is written
 from the MC68030 manual (UM §7, bus operation), not from RD68031 internals, because it
 must later drive a real MC68030.
+
+### So do RD68041's
+
+`Inputs/RD68041/CLAUDE.md`: its oracles (`Inputs/RD68041/Inputs/ref/`) are never opened
+either. `Inputs/QuadraFPGA` is a *bus witness*: a 68040 slave known to work against a
+real MC68040, evidence of what the part does on the bus, but not a golden model. Our 040
+bridge is written from the MC68040 manual (UM §7), for the same reason as the 030's.
 
 ### Mind the host's memory
 

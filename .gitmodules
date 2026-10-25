@@ -13,3 +13,9 @@
 [submodule "Inputs/IIsiFPGA"]
 	path = Inputs/IIsiFPGA
 	url = git@github.com:MelkhiorVintageComputing/IIsiFPGA.git
+[submodule "Inputs/RD68041"]
+	path = Inputs/RD68041
+	url = git@github.com:MelkhiorVintageComputing/RD68041.git
+[submodule "Inputs/QuadraFPGA"]
+	path = Inputs/QuadraFPGA
+	url = git@github.com:MelkhiorVintageComputing/QuadraFPGA.git

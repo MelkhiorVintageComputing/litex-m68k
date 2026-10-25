@@ -45,6 +45,7 @@ PTH=$SITE/litex-68k.pth
         fi
     done
     echo "$TOP/pythondata-cpu-rd68031"
+    echo "$TOP/pythondata-cpu-rd68041"
     echo "$HERE"
 } > "$PTH"
 
