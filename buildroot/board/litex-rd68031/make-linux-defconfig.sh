@@ -5,7 +5,8 @@
 # Regenerate the kernel configurations buildroot uses (doc/l8-buildroot.md):
 # allnoconfig with L7's linux/litex-rd68031.config and linux-buildroot.config,
 # saved with savedefconfig, as linux.defconfig; with linux-nofpu.config too, as
-# linux-nofpu.defconfig (doc/l9-nofpu.md). Buildroot expands them with
+# linux-nofpu.defconfig (doc/l9-nofpu.md); and with linux-040.config, the
+# 68040 buildroots' (L16), as linux-040.defconfig and linux-040-nofpu.defconfig. Buildroot expands them with
 # olddefconfig, which gives back those same configurations: what savedefconfig
 # leaves out is at its default, and allnoconfig's departures from the defaults
 # are written as "is not set".
@@ -37,3 +38,5 @@ gen() {
 K="make -s -C $SRC/linux-7.2.9 O=$TMP/build ARCH=m68k CROSS_COMPILE=m68k-linux-gnu-"
 gen linux.defconfig "$HERE/linux-buildroot.config"
 gen linux-nofpu.defconfig "$HERE/linux-buildroot.config" "$HERE/linux-nofpu.config"
+gen linux-040.defconfig "$HERE/linux-buildroot.config" "$HERE/linux-040.config"
+gen linux-040-nofpu.defconfig "$HERE/linux-buildroot.config" "$HERE/linux-nofpu.config" "$HERE/linux-040.config"

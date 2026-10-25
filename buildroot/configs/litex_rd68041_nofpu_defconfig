@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright 2026 Romain Dolbeau
+#
+# RD68041 as an MC68LC040 in a LiteX SoC: litex_rd68031_nofpu_defconfig (a
+# musl, soft-float userspace in an initramfs, doc/l9-nofpu.md) built for the
+# 68040, and a kernel for the 68040 alone, with the FPU emulator. L16,
+# doc/l11-rd68041.md.
+
+BR2_m68k=y
+BR2_m68k_68040=y
+
+# Sources checked by hash (board/litex-rd68031/patches/*/*.hash for the
+# kernel). patches-softfloat/gcc is patches/gcc: --with-float=soft for m68k.
+BR2_DOWNLOAD_FORCE_CHECK_HASHES=y
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/patches $(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/patches-softfloat"
+
+# Buildroot's own toolchain, defaulting to soft float (BR2_SOFT_FLOAT is
+# not offered for the 68040: -mcpu=68040 implies its FPU), and musl, which
+# follows the compiler (its m68k-sf ABI); glibc is soft-float on ColdFire only.
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+BR2_KERNEL_HEADERS_AS_KERNEL=y
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_7_1=y
+BR2_EXTRA_GCC_CONFIG_OPTIONS="--with-float=soft"
+
+# The system: BusyBox init, a getty on LiteUART, root without a password
+BR2_TARGET_GENERIC_HOSTNAME="litex68k"
+BR2_TARGET_GENERIC_ISSUE="LiteX-68K: RD68041 (MC68LC040), no FPU"
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
+BR2_TARGET_GENERIC_GETTY_PORT="ttyLXU0"
+BR2_TARGET_GENERIC_GETTY_BAUDRATE_KEEP=y
+BR2_SYSTEM_DHCP=""
+# No network configured at boot (the board's is tested by hand, udhcpc): no
+# ifup scripts
+# BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/check-softfloat.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/post-image.sh"
+
+# The kernel, with the FPU emulator (linux-nofpu.config)
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz"
+BR2_LINUX_KERNEL_PATCH="$(BR2_EXTERNAL_LITEX68K_PATH)/../patches/linux"
+BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
+BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/linux-040-nofpu.defconfig"
+BR2_LINUX_KERNEL_VMLINUX=y
+# dtc for the host: images.py compiles the SoC's device tree with it (L10,
+# doc/l10-devicetree.md)
+BR2_PACKAGE_HOST_DTC=y
+
+# BusyBox, with awk's math functions
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_LITEX68K_PATH)/board/litex-rd68031/busybox.config"
+
+# Packages beyond BusyBox: Lua, its doubles in software here
+BR2_PACKAGE_LUA=y
+# Lua's own default on 32-bit targets is float numbers: doubles, as the FPU build
+# BR2_PACKAGE_LUA_32BITS is not set
+
+# The root filesystem: a gzipped cpio, which litexboot hands the kernel
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_CPIO_GZIP=y
+# BR2_TARGET_ROOTFS_TAR is not set

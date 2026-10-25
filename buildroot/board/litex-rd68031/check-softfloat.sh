@@ -20,8 +20,10 @@ for f in $(find "$TARGET" -type f); do
 	head -c 4 "$f" | grep -q 'ELF' || continue
 	n=$((n + 1))
 	# objdump's lines are address, words, instruction, tab-separated; every
-	# m68k FPU mnemonic starts with f (fmove, fadd, fsave, fbeq, ...).
-	c=$("$OBJDUMP" -d "$f" | awk -F'\t' '$3 ~ /^f[a-z]/' | wc -l)
+	# m68k FPU mnemonic starts with f (fmove, fadd, fsave, fbeq, ...). But for
+	# ff1, ColdFire's find-first-one, which objdump decodes from data among
+	# the code ($04C4: busybox built for the 68040, L16).
+	c=$("$OBJDUMP" -d "$f" | awk -F'\t' '$3 ~ /^f[a-z]/ && $3 !~ /^ff1 /' | wc -l)
 	if [ "$c" -ne 0 ]; then
 		echo "check-softfloat: ${f#$TARGET}: $c FPU instructions" >&2
 		bad=1
