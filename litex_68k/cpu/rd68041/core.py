@@ -219,3 +219,10 @@ class RD68041(CPU):
 
     def do_finalize(self):
         self.specials += Instance("rd68041_top", **self.cpu_params)
+        # litex_sim, debugging only: RD68041_TRACE=1 at build time adds
+        # sim/litex/trace/rd68041_trace.sv, a trace of user mode on stdout.
+        from litex.build.sim import SimPlatform
+        if os.environ.get("RD68041_TRACE") and isinstance(self.platform, SimPlatform):
+            top = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            self.platform.add_source(os.path.join(top, "sim", "litex", "trace", "rd68041_trace.sv"), "systemverilog")
+            self.specials += Instance("rd68041_trace", i_clk=ClockSignal(self.clock_domain))
