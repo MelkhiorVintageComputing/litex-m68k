@@ -49,29 +49,38 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 |---|---|
 | `doc/plan.md` | the plan: milestones L0-L10 and why |
 | `doc/board.md` | the board for software work: the current bitstream (`~/LITEX-68K/bitstreams/`), `scripts/board.py` to load it and boot a kernel, interactive or unattended |
+| `doc/l11-rd68041.md` | L11-L16: RD68041, from the bridge to Linux, and the core's bug L15 found |
 | `doc/porting-bsd.md` | for porting a BSD OS: the boot protocol and a specification of each driver the SoC needs, from BSD and observed sources only (no GPL code) |
-| `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), and the Motorola and board documentation (add-only) |
+| `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), RD68041 (an MC68040), QuadraFPGA (a 68040 PDS card, our 040 bridge's bus witness), and the Motorola and board documentation (add-only) |
 | `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, L1-L5's bridge (`RD68031.bus_bridge = "sync"`) |
 | `litex_68k/m68030_fifo.py` | L6: the FIFO bridge, the default: the CPU on any clock, burst line fills, main RAM on a 128-bit LiteDRAM port (`doc/l6-fifo-bridge.md`) |
-| `sim/bench/` | L1: core + bridge + Wishbone RAM, no LiteX SoC (`make -C sim/bench check`, `BRIDGE=fifo` for L6's on a CPU clock of its own; `doc/l1-bench.md`) |
+| `litex_68k/m68k_fifo.py` | the FIFO bridges' SoC side (`FIFOToSoC`, its "wide" requests for 040 line writes) and the FIFOs, shared by both CPUs |
+| `litex_68k/m68040_bus.py` | L11: the MC68040 bus record and `M68040ToFIFOToSoC`, from the 040 manual's section 7 (`doc/l11-rd68041.md`) |
+| `sim/bench/` | L1: core + bridge + Wishbone RAM, no LiteX SoC (`make -C sim/bench check`, `BRIDGE=fifo` for L6's on a CPU clock of its own; `doc/l1-bench.md`; `CPU=rd68041 [FPU=0]`, `programs040/`, L11) |
 | `litex_68k/cpu/rd68031/` | the LiteX CPU class and its software files (`litex_68k.cpu.register()`; `doc/l2-litex.md`) |
-| `targets/sim.py` | `litex_sim` with RD68031 (`--uart-tx-clocks` paces its UART like a baud rate; `--cpu-clk-freq` puts the CPU on a clock of its own) |
+| `litex_68k/cpu/rd68041/` | L12: RD68041's (`standard`: the MC68LC040, `standard+fpu`: the MC68040); crt0's DTT0 for I/O, CINVA/CPUSHA |
+| `targets/sim.py` | `litex_sim` with RD68031, or `--cpu-type rd68041` (`--uart-tx-clocks` paces its UART like a baud rate; `--cpu-clk-freq` puts the CPU on a clock of its own) |
 | `sim/unit/` | migen unit tests of `core.py`'s bus crossing and time-out, two clocks, in migen's simulator: no Verilator build (`make -C sim/unit check`) |
-| `targets/qmtech_wukong.py` | L5/L6: the Wukong V3 board, DDR3 (CPU 30 MHz on its own MMCM, SoC 100 MHz) or block RAM, `--bus-bridge fifo` (default) or `sync` (CPU 25 MHz), `--cpu-variant standard+fpu` for RD68884 (`doc/l6-fpu.md`), `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md`; L10: litex-boards' `--with-ethernet --with-sdcard` (the L2 cache then off; `doc/l10-devicetree.md`) |
+| `targets/qmtech_wukong.py` | L5/L6: the Wukong V3 board, DDR3 (CPU 30 MHz on its own MMCM, SoC 100 MHz) or block RAM, `--bus-bridge fifo` (default) or `sync` (CPU 25 MHz), `--cpu-variant standard+fpu` for RD68884 (`doc/l6-fpu.md`), `--build` (Vivado) and `--load` (JTAG, through Vivado's hardware manager); `doc/l5-wukong.md`; `--cpu-type rd68041` (25 MHz, L14); L10: litex-boards' `--with-ethernet --with-sdcard` (the L2 cache then off; `doc/l10-devicetree.md`) |
 | `sim/litex/` | L2: smoke test in a LiteX SoC under `litex_sim` (`make -C sim/litex check`); L3: the BIOS, driven over the UART (`make -C sim/litex bios`; `doc/l3-bios.md`); L4: LiteX's demo and `cputest/` (exceptions, caches, MMU), loaded by the BIOS through `litex_term` (`make -C sim/litex l4`; `doc/l4-bare-metal.md`); the tests take `--cpu-clk-freq` and `--sdram` (DDR3, 128-bit native port) |
 | `linux/` | L7: Linux 7.2.9 and a BusyBox initramfs (`fetch.sh`, `build.sh` into `build/linux`; the kernel tree is `~/LITEX-68K/src/linux-7.2.9`, made from the tarball and `patches/linux`); `doc/l7-linux.md` |
-| `buildroot/` | the br2-external tree (`LITEX68K`), buildroot 2026.08, the kernel from `patches/linux`, a cpio initramfs. L8: `litex_rd68031_fpu_defconfig`, glibc, hard float (`doc/l8-buildroot.md`); L9: `litex_rd68031_nofpu_defconfig`, musl, soft float with `patches/gcc` and `patches/musl` (`doc/l9-nofpu.md`). `build.sh fpu\|nofpu` into `~/LITEX-68K/build/buildroot-<variant>` |
+| `buildroot/` | the br2-external tree (`LITEX68K`), buildroot 2026.08, the kernel from `patches/linux`, a cpio initramfs. L8: `litex_rd68031_fpu_defconfig`, glibc, hard float (`doc/l8-buildroot.md`); L9: `litex_rd68031_nofpu_defconfig`, musl, soft float with `patches/gcc` and `patches/musl` (`doc/l9-nofpu.md`). L16: `litex_rd68041_{fpu,nofpu}_defconfig`, the 68040's. `build.sh fpu\|nofpu\|040-fpu\|040-nofpu` into `~/LITEX-68K/build/buildroot-<variant>` |
 | `sw/litexboot/` | L7: the loader the BIOS boots with the images: vmlinux's segments, the bootinfo, the jump; `images.py` lays the images out (`images.json` for `litex_term --images` and litex_sim `--ram-init`); L10: with `--dtc`, the SoC's device tree too |
 | `sim/litex/l7_test.py` | L7: Linux to a shell and a command set, in litex_sim or on a board (`--serial`); L8: `--login` for buildroot's getty; `--variant standard` for the FPU-less one (L9); L10: the device tree (with buildroot's dtc), `--sdcard` (litex_sim's emulator), `--io` (a board's Ethernet and SD card; `--no-sd`, Ethernet only), `--sd-install` and `--sd-boot` (the board booting from its SD card) |
 | `sim/litex/fpswitch/` | two FPU tasks switched by timer0, the FPU saved as Linux does (`fpswitch_test.py`); the reduction of L7's FSAVE freeze |
-| `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented: `linux/` (the m68k LiteX machine, and its devices from a device tree), `litex/` (json2dts for m68k; the SD card driver's SCR on a big-endian CPU), `gcc/` (m68k soft float: `--with-float=soft`, musl's `-sf` loader, exact `long double`; host tests in `gcc/test/`), `musl/` (setjmp without an FPU); `RD68884/` has none (L7's fix is upstream) |
+| `sim/litex/cputest040/` | L13: cputest for RD68041 (the 040's frames, MMU, copyback, FPU traps); the tests take `--cpu-type rd68041` (`CPU=rd68041` in the Makefile) |
+| `sim/litex/trace/` | debugging only: RD68041's user-mode trace in litex_sim (`RD68041_TRACE=1` at build time), which found L15's bug |
+| `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented: `linux/` (the m68k LiteX machine, and its devices from a device tree), `litex/` (json2dts for m68k; the SD card driver's SCR on a big-endian CPU), `gcc/` (m68k soft float: `--with-float=soft`, musl's `-sf` loader, exact `long double`; host tests in `gcc/test/`), `musl/` (setjmp without an FPU), `RD68041/` (instruction fetch stopping at an ATC fault, L15); `RD68884/` has none (L7's fix is upstream) |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
 | `scripts/board.py` | load a bitstream snapshot, stop the BIOS, boot a kernel by serial or from the SD card, a console; `--until`/`--send` for unattended runs (`doc/board.md`) |
 | `scripts/snapshot_bitstream.sh` | copies a board build (bitstream, CSR maps, software) to `~/LITEX-68K/bitstreams/NAME` |
 | `scripts/patch_litex.sh` | makes `~/LITEX-68K/litex` (or another LiteX repository) from `~/LITEX` and `patches/litex`; `setup_venv.sh` then prefers it |
 | `scripts/patch_rd68884.sh` | when `patches/RD68884` has patches: makes `~/LITEX-68K/RD68884`, `Inputs/RD68884` with them and its microcode regenerated |
+| `scripts/patch_rd68041.sh` | makes `~/LITEX-68K/RD68041`, `Inputs/RD68041` with `patches/RD68041` |
+| `scripts/sync_pythondata_rd68041.sh` | fills `../pythondata-cpu-rd68041` from that patched copy (or `Inputs/RD68041` with no patches) |
 | `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031`, and the FPU from `Inputs/RD68884` (or its patched copy, `scripts/patch_rd68884.sh`) |
 | `../pythondata-cpu-rd68031` | the RD68031 and RD68884 RTL snapshot LiteX builds from (`get_data_mod("cpu", "rd68031")`) |
+| `../pythondata-cpu-rd68041` | RD68041's (`get_data_mod("cpu", "rd68041")`) |
 
 ## Environment
 

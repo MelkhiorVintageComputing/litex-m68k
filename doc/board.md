@@ -37,6 +37,21 @@ conditional branch the wrong way after a context switch.
 `~/LITEX-68K/bitstreams/wukong-nofpu-eth-sd-7c668f4/` is the same SoC without
 the FPU (`--bitstream` selects it), for software built for soft float.
 
+**RD68041**, an MC68040, at 25 MHz (`doc/l11-rd68041.md`), with the same
+devices, map, interrupts and BIOS:
+- `~/LITEX-68K/bitstreams/wukong-rd68041-fpu-eth-sd-25m-p1/`: the MC68040,
+  FPU included.
+- `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-p1/`: the
+  MC68LC040, no FPU.
+
+`-p1` means `patches/RD68041` 0001 is in them. The earlier
+`wukong-rd68041-fpu-eth-sd-25m/` is without it: it runs the BIOS and bare
+metal, but Linux with glibc dies at init.
+
+A kernel for them must know the 68040: its caches are copyback-capable and
+pushed with CPUSH, I/O wants a TTR or noncachable pages, and the FPU leaves
+some instructions to the M68040FPSP (`doc/porting-bsd.md`).
+
 | | |
 |---|---|
 | CPU | RD68031 (MC68030, MMU, caches) at 30 MHz, with RD68884 (MC68881 FPU) |
@@ -118,12 +133,16 @@ driving the console: logging in, running commands, checking answers.
 
 ## The SD card
 
-- **Its current contents:** NetBSD's, in p1 and p2. The Linux filesystems
-  `l7_test.py --sd-install` made (`doc/l10-devicetree.md`) are gone; Linux
-  now boots from memory, by serial (`boot`, or `l7_test.py --serial`).
-  - Linux tests that must keep the card: `l7_test.py --io --no-sd`
-    (Ethernet only). Plain `--io`, `--sd-install` and `--sd-boot` overwrite
-    or need the Linux layout.
+- **Its current contents** (made by `l7_test.py --cpu-type rd68041
+  --sd-install`, `doc/l11-rd68041.md`):
+  - p1, FAT: `boot.json` and the MC68040 Linux kernel (68040 buildroot), with
+    `soc.dtb`, `params.bin` and `litexboot.bin` built for
+    `wukong-rd68041-fpu-eth-sd-25m-p1`; `nofpu/vmlinux`, the LC040's kernel;
+  - p2, ext2: the MC68040 buildroot's root filesystem (glibc);
+  - p3, ext2: the MC68LC040's (musl).
+  - The NetBSD filesystems that were there before are gone.
+- **Tests that keep the card:** `l7_test.py --io --no-sd` (Ethernet only).
+  Plain `--io` and `--sd-install` overwrite it.
 - **While p1 holds a `boot.json`, every load boots from the card**,
   unless litex_term answers first (`boot` does). To get the BIOS prompt, use
   `board.py prompt`, which presses Q at "Press Q or ESC".

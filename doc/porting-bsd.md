@@ -1,6 +1,7 @@
 # Porting a BSD operating system to LiteX-68K
 
-What a BSD kernel needs in order to run on RD68031 (an MC68030) in a LiteX SoC,
+What a BSD kernel needs in order to run on RD68031 (an MC68030) in a LiteX SoC
+(and, section 9, on RD68041, an MC68040),
 as this project builds it: the boot code that exists, the drivers a port must
 write, and a specification for each one. It is written for someone who has not
 seen this project. Read it beside the MC68030 user's manual and LiteX's
@@ -856,7 +857,69 @@ Bitstreams to use:
 | FPU, serial only | `... --cpu-variant standard+fpu --uart-baudrate 1000000` |
 | no FPU | `... --cpu-variant standard --uart-baudrate 1000000` |
 
-## 9. Sources
+## 9. RD68041: the same SoC with an MC68040
+
+`~/LITEX-68K/bitstreams/wukong-rd68041-{fpu,nofpu}-eth-sd-25m-p1` (`doc/board.md`)
+run RD68041, an MC68040, or an MC68LC040 without its FPU, at 25 MHz. The
+memory map, the CSRs, the interrupts (IPL 2, autovector 26), the devices,
+litexboot and the bootinfo are the same, but for what follows. The sources
+are the MC68040 user's manual (UM below) and what was seen here
+(`doc/l11-rd68041.md`).
+
+- **The bootinfo:**
+
+  | Record | Value |
+  |---|---|
+  | `BI_CPUTYPE` | `0x4` (68040) |
+  | `BI_MMUTYPE` | `0x4` (68040) |
+  | `BI_FPUTYPE` | `0x4` (the 68040's own), or 0 on the LC040 |
+
+- **The state at the kernel's entry:**
+  - IPL 7, translation off;
+  - both caches pushed (CPUSHA), invalidated (CINVA) and disabled (CACR 0);
+  - ITT0/1 and DTT0/1 cleared, as out of reset.
+- **Caches** (UM 4):
+  - Copyback is available, and with it come dirty lines.
+  - With translation off and no TTR matching, accesses are cachable
+    write-through (UM 3.1.2).
+  - Device registers must be noncachable and serialized. Use a TTR (the BIOS's
+    crt0 uses DTT0 for $8000_0000 up) or page descriptors with CM = 10.
+  - The bridge asserts TCI on reads there, which keeps them out of the caches.
+    It does not order them, and it does not stop a cachable *line* read
+    from reading four registers.
+  - The bridge never snoops: **DMA is not coherent**. Before a device reads
+    memory, push the lines (CPUSHL or CPUSHP). Before the CPU reads what a
+    device wrote, invalidate them (CINVL or CINVP).
+  - A cache-inhibited access to a line that is dirty in the cache pushes it
+    first (UM 4.3.2).
+- **The MMU** (UM 3): TC, URP, SRP, the TTRs, MMUSR, three-level tables, and
+  PTEST and PFLUSH, as the manual has them.
+  - A table search that finds an invalid descriptor leaves an ATC entry that
+    is not resident (UM 3.2.2.3).
+  - So a handler that makes a page resident must PFLUSH that page's entry
+    before returning. Linux flushes only the faulting page's entry, by its
+    PTEST.
+  - RD68041 had a defect here, fixed in the `-p1` bitstreams
+    (`patches/RD68041` 0001): an instruction fetch went on past an ATC fault,
+    and so left a not-resident entry for the *next* page too.
+- **Exceptions:**
+  - Access errors are format $7 (UM 8.4.6). The SSW is at +$C and the FA at
+    +$14.
+  - RD68041 takes a write's translation fault before the write, so a frame's
+    write-back slots are never pending (RD68041 `doc/divergences.md`).
+  - Address errors and unimplemented FP instructions are format $2.
+- **The FPU:**
+  - The MC68040 leaves the transcendentals, FMOVECR, FINT/FINTRZ, FMOD, FREM,
+    FSCALE and others to software: vector 11, format $2 (UM 9.6.1). A kernel
+    needs the M68040FPSP, or its own emulation of those.
+  - The FSAVE frames are null, idle ($41, size 0), unimplemented ($41, $30)
+    and busy ($41, $60) (UM 9.8). The 040 makes busy frames only for pending
+    exceptions.
+  - On the MC68LC040 every FP instruction takes F-line with a format $4 frame
+    (UM appendix A). Without an FPU emulator in the kernel, user space must
+    be soft-float.
+
+## 10. Sources
 
 - LiteX (BSD-2-Clause): `litex/soc/cores/{timer,uart}.py`,
   `litex/soc/integration/soc.py` (`SoCController`, `add_sdcard`,
@@ -868,7 +931,8 @@ Bitstreams to use:
   documents `doc/l2-litex.md` to `doc/l10-devicetree.md`. They are prose
   about the Linux port as well as the hardware; read them for behaviour,
   not for kernel code.
-- Motorola: MC68030 user's manual and MC68881/MC68882 user's manual
+- Motorola: MC68030 user's manual and MC68881/MC68882 user's manual; for
+  section 9, the MC68040 user's manual
   (`Inputs/doc/`).
 - Not to be read for a BSD port: `patches/linux`, the Linux kernel, QEMU, the
   `linux-on-litex-vexriscv` kernel patches, and RD68031's reference models

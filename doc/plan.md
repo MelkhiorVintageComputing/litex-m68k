@@ -185,8 +185,21 @@ for the drivers (`patches/linux` 0002), the machine's core staying on bootinfo.
 LiteEth and LiteSDCard on the Wukong (`--with-ethernet --with-sdcard`, L2 cache
 off), the SD emulator in litex_sim.
 
+**L11-L17 — RD68041, an MC68040.** *Done, in litex_sim and on the Wukong:
+`doc/l11-rd68041.md`.* The same ladder for RD68041 (`Inputs/RD68041`; the
+MC68LC040 with `FPU = 0`):
+- L11: `../pythondata-cpu-rd68041`, and the MC68040 bridge
+  (`litex_68k/m68040_bus.py`, from UM section 7, QuadraFPGA as a bus witness)
+  on the L1 bench (`sim/bench` `CPU=rd68041`).
+- L12-L13: the LiteX CPU class, the BIOS, and cputest040 in litex_sim.
+- L14: the Wukong at 25 MHz, both variants.
+- L15: Linux with RD68031's userspace, one kernel for the 030 and the 040. It
+  found a defect in RD68041's instruction fetch, `patches/RD68041` 0001.
+- L16: buildroot built for the 68040 (`litex_rd68041_{fpu,nofpu}_defconfig`).
+- L17: the documentation.
+
 **Later, noted.** Upstreaming `arch/m68k/litex`, `patches/litex`, `patches/gcc`,
-`patches/musl` (the RD68884 fix is upstream: 7a188db).
+`patches/musl` (the RD68884 fix is upstream: 7a188db), `patches/RD68041`.
 
 **Later (out of this plan's scope, noted for design choices now):**
 - Hard CPU: reuse the bridge as the FPGA-side slave with pin I/O + synchronisers;
