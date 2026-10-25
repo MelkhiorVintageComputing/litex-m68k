@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // Copyright 2026 Romain Dolbeau
 
-/* litexboot: Linux/m68k for RD68031 in a LiteX SoC (doc/l7-linux.md).
+/* litexboot: Linux/m68k for RD68031 or RD68041 in a LiteX SoC (doc/l7-linux.md).
  *
  * The BIOS loads the images images.py placed (layout.h) and jumps here. This
  * program, built against the SoC's generated headers:
@@ -28,6 +28,19 @@
 
 #include "bootinfo.h"
 #include "layout.h"
+
+/* The processor, as the SoC was built (generated/soc.h). */
+#ifdef CONFIG_CPU_TYPE_RD68041
+#define CPU_TYPE   CPU_68040
+#define MMU_TYPE   MMU_68040
+#define FPU_TYPE   FPU_68040
+#define FPU_NAME   "68040"
+#else
+#define CPU_TYPE   CPU_68030
+#define MMU_TYPE   MMU_68030
+#define FPU_TYPE   FPU_68881
+#define FPU_NAME   "68881"
+#endif
 
 /* probe.S */
 extern int fpu_probe(void);
@@ -94,7 +107,7 @@ int main(void)
 	unsigned long end = 0;
 	int i, fpu;
 
-	printf("\nlitexboot: Linux/m68k on RD68031, main RAM 0x%08lx+0x%lx\n",
+	printf("\nlitexboot: Linux/m68k on " CONFIG_CPU_HUMAN_NAME ", main RAM 0x%08lx+0x%lx\n",
 	       (unsigned long)MAIN_RAM_BASE, (unsigned long)MAIN_RAM_SIZE);
 	if (p->magic != PARAMS_MAGIC || p->version != PARAMS_VERSION) {
 		printf("litexboot: no parameters at %p (images.py)\n", p);
@@ -124,9 +137,9 @@ int main(void)
 	fpu = has_fpu();
 	bi = (uint8_t *)(MAIN_RAM_BASE + end);
 	record32(BI_MACHTYPE, MACH_LITEX);
-	record32(BI_CPUTYPE, CPU_68030);
-	record32(BI_FPUTYPE, fpu ? FPU_68881 : 0);
-	record32(BI_MMUTYPE, MMU_68030);
+	record32(BI_CPUTYPE, CPU_TYPE);
+	record32(BI_FPUTYPE, fpu ? FPU_TYPE : 0);
+	record32(BI_MMUTYPE, MMU_TYPE);
 	record64(BI_MEMCHUNK, MAIN_RAM_BASE, MAIN_RAM_SIZE);
 	if (p->initrd_size)
 		record64(BI_RAMDISK, p->initrd_addr, p->initrd_size);
@@ -142,7 +155,7 @@ int main(void)
 
 	printf("litexboot: bootinfo at 0x%08lx (%ld bytes), FPU %s, initrd 0x%08lx+0x%lx\n",
 	       (unsigned long)(MAIN_RAM_BASE + end), (long)(bi - (uint8_t *)(MAIN_RAM_BASE + end)),
-	       fpu ? "68881" : "none", p->initrd_addr, p->initrd_size);
+	       fpu ? FPU_NAME : "none", p->initrd_addr, p->initrd_size);
 	if (p->dtb_size)
 		printf("litexboot: device tree 0x%08lx+0x%lx\n", p->dtb_addr, p->dtb_size);
 	printf("litexboot: command line \"%s\", sys clock %lu Hz\n", p->cmdline,

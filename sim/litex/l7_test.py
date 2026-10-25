@@ -3,7 +3,7 @@
 # Copyright 2026 Romain Dolbeau
 
 """L7: Linux on RD68031 in a LiteX SoC, to a shell, and a command set
-(doc/l7-linux.md).
+(doc/l7-linux.md); --cpu-type rd68041 for RD68041 (L15).
 
     l7_test.py                          the simulation (litex_sim)
     l7_test.py --serial /dev/ttyUSB0 --build-dir build/qmtech_wukong_30m_fpu
@@ -50,7 +50,7 @@ SHELL_PROMPT = "l7# "
 COMMANDS = [
     ("echo sum $((6*7)) product $((123*457))", r"sum 42 product 56211"),
     ("uname -m -r",                            r"7\.2\.9-litex m68k"),
-    ("grep -E '^(CPU|MMU|FPU):' /proc/cpuinfo", r"CPU:\s+68030\nMMU:\s+68030\nFPU:\s+{fpu}"),
+    ("grep -E '^(CPU|MMU|FPU):' /proc/cpuinfo", r"CPU:\s+{cpu}\nMMU:\s+{cpu}\nFPU:\s+{fpu}"),
     ("seq 1 200 | md5sum",                     r"304f7b9574921ad21a2bc72f200483d7"),
     ("echo hello > /f; wc -c < /f; rm /f",     r"^6$"),
     ("awk 'BEGIN{printf \"%.6f\\n\", atan2(1,1)*4}'", r"3\.141593"),
@@ -286,7 +286,9 @@ def interrupts(con):
 
 def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
-    parser = argparse.ArgumentParser(description="L7: Linux on RD68031, to a shell.")
+    parser = argparse.ArgumentParser(description="L7: Linux on RD68031 or RD68041, to a shell.")
+    parser.add_argument("--cpu-type",  default="rd68031", choices=["rd68031", "rd68041"],
+        help="The CPU: RD68031 (an MC68030) or RD68041 (an MC68040; L15).")
     parser.add_argument("--variant",   default="standard+fpu", help="CPU variant.")
     parser.add_argument("--port",      default=2432, type=int, help="Simulation: TCP port for the UART.")
     parser.add_argument("--main-ram",  default=0x2000000, type=lambda x: int(x, 0),
@@ -297,6 +299,10 @@ def main():
         help="linux/build.sh's output: vmlinux, initramfs.cpio.gz.")
     parser.add_argument("--build-dir", default=None,
         help="The SoC's build directory (default: build/<variant>/l7, a simulation).")
+    parser.add_argument("--initramfs", default=None,
+        help="The initramfs (default: initramfs.cpio.gz in --linux-dir).")
+    parser.add_argument("--cmdline",   default="console=liteuart0",
+        help="The kernel's command line (the command set checks it starts with console=liteuart0).")
     parser.add_argument("--serial",    default=None,
         help="A board's serial port instead of the simulation: the board runs the SoC "
              "built in --build-dir, its BIOS at the prompt.")
@@ -350,9 +356,12 @@ def main():
         dtc = dtc if os.path.exists(dtc) else None
     if args.no_dtb:
         dtc = None
-    sim_extra = ["--with-sdcard"] if args.sdcard else []
+    sim_extra = ["--cpu-type", args.cpu_type] + (["--with-sdcard"] if args.sdcard else [])
+    cpu = "68040" if args.cpu_type == "rd68041" else "68030"
+    fpu_name = "68040" if args.cpu_type == "rd68041" else "68881"
 
-    build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant, "l7"))
+    build = os.path.abspath(args.build_dir or os.path.join(HERE, "build", args.variant,
+        "l7" + ("-" + args.cpu_type if args.cpu_type != "rd68031" else "")))
     out = os.path.join(build, "l7")
     os.makedirs(out, exist_ok=True)
     sim = term = None
@@ -369,8 +378,9 @@ def main():
         images = os.path.join(out, "images")
         run([sys.executable, os.path.join(TOP, "sw", "litexboot", "images.py"), "--build-dir", build,
              "--vmlinux", os.path.join(args.linux_dir, "vmlinux"),
-             "--initramfs", os.path.join(args.linux_dir, "initramfs.cpio.gz"),
+             "--initramfs", args.initramfs or os.path.join(args.linux_dir, "initramfs.cpio.gz"),
              "--loader", os.path.join(lb, "litexboot.bin"), "--sys-clk", str(sys_clk),
+             "--cmdline", args.cmdline,
              *(["--dtc", dtc] if dtc else []),
              "--out-dir", images], out, os.path.join(out, "images.log"), "images.py")
         images_json = os.path.join(images, "images.json")
@@ -448,7 +458,7 @@ def main():
 
         # 3. litexboot, the kernel, /init.
         got = con.expect(r"litexboot: entry 0x[0-9a-f]+", 600)
-        check("FPU 68881" in got if "fpu" in args.variant else "FPU none" in got,
+        check("FPU " + fpu_name in got if "fpu" in args.variant else "FPU none" in got,
               "litexboot: wrong FPU for the {} variant".format(args.variant))
         check(("litexboot: device tree" in got) == bool(dtc),
               "litexboot: device tree {}expected".format("" if dtc else "not "))
@@ -487,7 +497,7 @@ def main():
         libc = "/lib/libc.so.6" if fpu else "/lib/ld-musl-m68k-sf.so.1"
         # The emulator's block: words 0 to 127, big-endian.
         sd_block_md5 = hashlib.md5(b"".join(i.to_bytes(4, "big") for i in range(128))).hexdigest()
-        subst = dict(fpu="68881" if fpu else "none", libc=libc, libc_re=re.escape(libc),
+        subst = dict(cpu=cpu, fpu=fpu_name if fpu else "none", libc=libc, libc_re=re.escape(libc),
                      sd_block_md5=sd_block_md5)
         commands = COMMANDS + (LOGIN_COMMANDS if args.login else []) + \
             (DT_COMMANDS if dtc else []) + (SIM_SD_COMMANDS if args.sdcard else [])

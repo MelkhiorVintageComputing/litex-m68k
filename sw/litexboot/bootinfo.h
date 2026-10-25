@@ -25,7 +25,10 @@
 
 #define MACH_LITEX       15
 #define CPU_68030        (1 << 1)
+#define CPU_68040        (1 << 2)
 #define FPU_68881        (1 << 0)
+#define FPU_68040        (1 << 2)       /* the MC68040's own */
 #define MMU_68030        (1 << 1)
+#define MMU_68040        (1 << 2)
 
 #endif
