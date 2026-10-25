@@ -12,4 +12,6 @@ it before LiteX builds its argument parser.
 def register():
     from litex.soc.cores import cpu
     from litex_68k.cpu.rd68031 import RD68031
+    from litex_68k.cpu.rd68041 import RD68041
     cpu.CPUS.setdefault("rd68031", RD68031)
+    cpu.CPUS.setdefault("rd68041", RD68041)

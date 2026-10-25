@@ -26,7 +26,7 @@ _start:
         movec   %d0, %dtt0
         move.l  #DTT1_RAM, %d0
         movec   %d0, %dtt1
-        cinva   %bc                     | nothing valid out of reset (UM 4.4)
+        cinva   %bc                     | nothing valid out of reset (UM 4.2)
         move.l  #(CACR_DE+CACR_IE), %d0
         movec   %d0, %cacr
 

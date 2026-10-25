@@ -19,7 +19,7 @@ Requests are carried out in order, so a read always sees the writes before it.
 
 Two request formats. Narrow (the MC68030's): a write is one long word, `dat`
 and `sel` its own; only reads may be lines. Wide (the MC68040's, which also
-writes lines, UM 7.4.3): `dat` and `sel` are a whole line, word k in bits
+writes lines, UM 7.4.4): `dat` and `sel` are a whole line, word k in bits
 32k+31..32k and its byte enables in bits 4k+3..4k; a write of one long word
 has its data and enables at its word of the line, and a line write (`line`
 with `we`) writes all four.

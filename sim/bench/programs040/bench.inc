@@ -16,10 +16,10 @@
 
         | The RAM repeats every 256 KB up to $0FFF_FFFF. Below ALIAS, DTT1 makes
         | it copyback; from ALIAS, no TTR matches, which with translation off is
-        | cachable, write-through (UM 3.1.1): the same memory, another cache mode.
+        | cachable, write-through (UM 3.1.2): the same memory, another cache mode.
         .equ    ALIAS,          0x01000000
 
-        | CACR (UM 4.5)
+        | CACR (UM 4.2)
         .equ    CACR_DE,        0x80000000
         .equ    CACR_IE,        0x00008000
 

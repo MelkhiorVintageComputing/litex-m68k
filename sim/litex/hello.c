@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // Copyright 2026 Romain Dolbeau
 
-/* L2 smoke test: RD68031 in a LiteX SoC, before the BIOS. From the ROM, with
- * LiteX's generated headers and the CPU's own irq.h: the UART, a CTRL CSR, the
- * CPU's interrupt CSRs and the interrupt enable. Prints "L2 PASS" or "L2 FAIL",
- * then ends the simulation (litex_sim --sim-debug). */
+/* L2 smoke test: the CPU (RD68031 or RD68041) in a LiteX SoC, before the
+ * BIOS. From the ROM, with LiteX's generated headers and the CPU's own irq.h:
+ * the UART, a CTRL CSR, the CPU's interrupt CSRs and the interrupt enable.
+ * Prints "L2 PASS" or "L2 FAIL", then ends the simulation (litex_sim
+ * --sim-debug). */
 
 #include <generated/csr.h>
+#include <generated/soc.h>
 #include <irq.h>
 
 static void put(char c)
@@ -96,7 +98,7 @@ static int timer_interrupts(void)
 
 int main(void)
 {
-	print("\nHello from RD68031 on LiteX\n");
+	print("\nHello from " CONFIG_CPU_HUMAN_NAME " on LiteX\n");
 
 	ctrl_scratch_write(0xdeadbeef);
 	check("ctrl_scratch", ctrl_scratch_read(), 0xdeadbeef);

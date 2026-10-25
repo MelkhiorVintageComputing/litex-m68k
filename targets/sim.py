@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright 2026 Romain Dolbeau
 
-"""litex_sim with the m68k CPUs registered, and RD68031 the default CPU.
+"""litex_sim with the m68k CPUs registered, and RD68031 the default CPU
+(--cpu-type rd68041 for RD68041).
 
 Every litex_sim option works as there, e.g.:
 
@@ -18,7 +19,7 @@ and one more:
                          for it (doc/l5-wukong.md).
     --cpu-clk-freq F     the CPU on a clock of its own, F Hz, and the rest of the
                          SoC at litex_sim's sys, 1 MHz (e.g. 0.3125e6, as 31.25
-                         MHz against 100 MHz). RD68031's FIFO bridge needs no
+                         MHz against 100 MHz). The FIFO bridges need no
                          relation between the two; litex_sim needs half its
                          period to be a whole number of picoseconds.
 """
@@ -36,6 +37,7 @@ from litex.build.generic_platform import Pins
 
 from litex_68k.cpu import register
 from litex_68k.cpu.rd68031.core import RD68031
+from litex_68k.cpu.rd68041.core import RD68041
 
 def paced_uart_phy(clocks):
     """litex_sim's UART PHY model, with its transmit side paced: one byte, then
@@ -69,7 +71,7 @@ def paced_uart_phy(clocks):
     return PacedRS232PHYModel
 
 def cpu_clock_domain(litex_sim, freq):
-    """A "cpu" clock domain, from a second clocker at `freq`, for RD68031."""
+    """A "cpu" clock domain, from a second clocker at `freq`, for the CPU."""
     litex_sim._io.append(("cpu_clk", 0, Pins(1)))
 
     class SimConfig(litex_sim.SimConfig):
@@ -90,6 +92,7 @@ def cpu_clock_domain(litex_sim, freq):
             ]
     litex_sim.SimSoC = SimSoC
     RD68031.clock_domain = "cpu"
+    RD68041.clock_domain = "cpu"
 
 def main():
     register()

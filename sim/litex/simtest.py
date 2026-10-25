@@ -28,11 +28,13 @@ def check(cond, what):
 # The simulation ------------------------------------------------------------------------------------
 
 # DDR3 as on the Wukong: 16 bits, 1:4, so LiteDRAM's port is 128 bits wide, a
-# cache line, and RD68031's FIFO bridge reads main RAM on a native port.
+# cache line, and the CPUs' FIFO bridges read main RAM on a native port.
 SDRAM = ["--with-sdram", "--sdram-module", "MT41K128M16", "--sdram-data-width", "16"]
 
 def add_sim_options(parser):
     """The options of a test that change the simulated SoC (sim_options)."""
+    parser.add_argument("--cpu-type", default="rd68031", choices=["rd68031", "rd68041"],
+        help="The CPU: RD68031 (an MC68030) or RD68041 (an MC68040).")
     parser.add_argument("--uart-tx-clocks", default=None,
         help="Simulation: pace the UART's transmit side, a byte every N clocks (targets/sim.py).")
     parser.add_argument("--cpu-clk-freq", default=None,
@@ -42,7 +44,7 @@ def add_sim_options(parser):
 
 def sim_options(args):
     """targets/sim.py's options for add_sim_options's."""
-    options = []
+    options = ["--cpu-type", getattr(args, "cpu_type", "rd68031")]
     if getattr(args, "uart_tx_clocks", None):
         options += ["--uart-tx-clocks", str(args.uart_tx_clocks)]
     if args.cpu_clk_freq:
@@ -53,7 +55,9 @@ def sim_options(args):
 
 def sim_build_name(args, name):
     """A build directory's name for add_sim_options's: they change the SoC."""
-    return name + ("-cpu" + str(args.cpu_clk_freq) if args.cpu_clk_freq else "") + \
+    cpu = getattr(args, "cpu_type", "rd68031")
+    return name + ("-" + cpu if cpu != "rd68031" else "") + \
+        ("-cpu" + str(args.cpu_clk_freq) if args.cpu_clk_freq else "") + \
         ("-sdram" if args.sdram else "")
 
 def sim_command(variant, build, port, extra=(), main_ram=0x10000):

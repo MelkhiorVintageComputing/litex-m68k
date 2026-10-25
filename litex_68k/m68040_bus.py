@@ -45,7 +45,7 @@ m68040_bus_layout = [
     ("d_r",     32, DIR_S_TO_M), # data, read
     ("tt",       2, DIR_M_TO_S), # transfer type (UM 5.3.1, Table 5-2); 3 is an acknowledge
     ("tm",       3, DIR_M_TO_S), # transfer modifier (UM 5.3.2); an acknowledge's level
-    ("siz",      2, DIR_M_TO_S), # 0 long word, 1 byte, 2 word, 3 line (UM 5.3.6, Table 7-2)
+    ("siz",      2, DIR_M_TO_S), # 0 long word, 1 byte, 2 word, 3 line (UM 5.3.6)
     ("rw",       1, DIR_M_TO_S), # 1 = read (UM 5.3.5)
     ("lock_n",   1, DIR_M_TO_S), # locked transfer (UM 5.3.7)
     ("ciout_n",  1, DIR_M_TO_S), # cache inhibit out (UM 5.3.9)
@@ -102,7 +102,7 @@ class M68040ToFIFO(LiteXModule):
     - Writes outside io_regions are posted: TA as soon as the request is in the
       FIFO, and a write the SoC cannot do is lost, since the processor has moved
       on. A line write (a copyback push, or MOVE16) is taken a long word a
-      clock, TA on each (UM 7.4.3), then posted as one request, wherever it is.
+      clock, TA on each (UM 7.4.4), then posted as one request, wherever it is.
       A long word, word or byte write in io_regions waits for its answer, so a
       device register is written before the next instruction runs, and an error
       there is an error on that transfer.
@@ -212,7 +212,7 @@ class M68040ToFIFO(LiteXModule):
                     ),
                 ).Elif(line,
                     # The first long word is on the bus by the end of C2 (UM
-                    # 7.4.3), so TA may go with it: one each clock from here.
+                    # 7.4.4), so TA may go with it: one each clock from here.
                     NextValue(ta_n, 0),
                     NextState("LINE-WRITE"),
                 ).Else(
@@ -262,7 +262,7 @@ class M68040ToFIFO(LiteXModule):
             ),
         )
         # A line write: each long word is taken on the edge the processor
-        # samples its TA, and the next is on the bus from then on (UM 7.4.3,
+        # samples its TA, and the next is on the bus from then on (UM 7.4.4,
         # Figure 7-17). The fourth: TA negated, the line posted.
         self.sync += If(fsm.ongoing("LINE-WRITE"),
             Case(word, {k: wline[32*k:32*(k + 1)].eq(bus.d_w) for k in range(4)}),

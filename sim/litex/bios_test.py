@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright 2026 Romain Dolbeau
 
-"""L3: the LiteX BIOS on RD68031, under litex_sim, driven over the UART.
+"""L3: the LiteX BIOS on RD68031 (or RD68041), under litex_sim, driven over the UART.
 
 Builds the SoC with its BIOS (targets/sim.py), runs it with the UART on a TCP
 port, waits for the prompt and types commands, each answer checked against
@@ -14,10 +14,11 @@ something worked out independently of the CPU:
     crc               the BIOS's CRC32 of the start of the ROM, against Python's
                       zlib.crc32 of the same bytes of bios.bin
     uptime (twice)    the timer moves
-    flush_cpu_dcache  CACR's CD, then memory still reads right
+    flush_cpu_dcache  CACR's CD (RD68041: CPUSHA), then memory still reads right
     mem_read          of an address nothing answers: the bridge's timeout, a bus
-                      error, and crt0's exception report (format $B, vector 2).
-                      Last, since the BIOS stops there.
+                      error, and crt0's exception report (format $B, vector 2;
+                      RD68041: an access error, format $7). Last, since the
+                      BIOS stops there.
 
 Prints each exchange, then "L3 PASS" or "L3 FAIL: <why>"; exit status 0 on pass.
 """
@@ -38,7 +39,7 @@ def csr_ident(build):
     raise Fail("no identifier_mem in csr.csv")
 
 def main():
-    parser = argparse.ArgumentParser(description="L3: the LiteX BIOS on RD68031, under litex_sim.")
+    parser = argparse.ArgumentParser(description="L3: the LiteX BIOS on RD68031 or RD68041, under litex_sim.")
     parser.add_argument("--variant",   default="standard", help="CPU variant.")
     parser.add_argument("--port",      default=2430, type=int, help="TCP port for the UART.")
     parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/bios, with the simulation options in its name).")
@@ -102,8 +103,9 @@ def main():
         check(re.search(r"40001004\s+ca fe f0 0d", out), "mem_read after flush_cpu_dcache")
 
         out = con.command("mem_read 0x90000000 4", until="SR ")
-        check(re.search(r"exception: format/vector b008", out),
-            "no bus error report (format $B, vector offset $008)")
+        fmt = "7" if args.cpu_type == "rd68041" else "b"
+        check(re.search(r"exception: format/vector {}008".format(fmt), out),
+            "no bus error report (format ${}, vector offset $008)".format(fmt.upper()))
 
         print("\nL3 PASS", flush=True)
         return 0

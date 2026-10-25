@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright 2026 Romain Dolbeau
 
-"""L4: bare-metal programs on RD68031, loaded by the LiteX BIOS over the UART.
+"""L4: bare-metal programs on RD68031 (or RD68041), loaded by the LiteX BIOS over the UART.
 
 The way a board is used: litex_term on the UART (here the simulation's TCP
 port, as socket://), answering the BIOS's serial boot request with an image.
 
     1. The SoC's software only (targets/sim.py --no-compile-gateware), then
        against it LiteX's own bare-metal demo, unchanged (litex_bare_metal_demo's
-       demo.py), and cputest (cputest/).
+       demo.py), and cputest (cputest/; for RD68041, cputest040/).
     2. The simulation, litex_term on its UART through a pseudo-terminal (it
        wants one), loading <build>/boot.bin at 0x40000000. boot.bin is the
        demo first: litex_term reads the file when the BIOS asks for it.
@@ -17,7 +17,8 @@ port, as socket://), answering the BIOS's serial boot request with an image.
        the demo's reboot resets the SoC: the BIOS boots again, loads cputest.
     4. cputest: its PASS line, what the caches did (stale with the standard
        variant's caches, coherent without them; the data cache's aliases only
-       without write allocation), and crt0's report of the
+       without write allocation; RD68041: its instruction cache until CINV, a
+       dirty copyback line pushed by a cache-inhibited read), and crt0's report of the
        last exception, an illegal instruction at the address cputest gave.
 
 Prints the exchanges, then "L4 PASS" or "L4 FAIL: <why>"; exit status 0 on pass.
@@ -44,7 +45,7 @@ def run(cmd, cwd, log, what):
         if subprocess.call(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, env=venv_env()):
             raise Fail("{} failed (see {})".format(what, log))
 
-def build_programs(soc, out):
+def build_programs(soc, out, cputest_dir="cputest"):
     """The demo and cputest, against the software of the SoC built in `soc`, into `out`.
     From scratch: their Makefiles track sources, not the SoC's compiler flags
     (-msoft-float or not), so objects from another SoC's flags would stay."""
@@ -54,7 +55,7 @@ def build_programs(soc, out):
         os.path.join(out, "demo.log"), "the demo")
     ct = os.path.join(out, "cputest")
     os.makedirs(ct, exist_ok=True)
-    run(["make", "-f", os.path.join(HERE, "cputest", "Makefile"), "BUILD_DIR=" + soc], ct,
+    run(["make", "-f", os.path.join(HERE, cputest_dir, "Makefile"), "BUILD_DIR=" + soc], ct,
         os.path.join(out, "cputest.log"), "cputest")
     return os.path.join(out, "demo.bin"), os.path.join(ct, "cputest.bin")
 
@@ -72,7 +73,7 @@ def main():
     # A SIGTERM (timeout(1), say) ends the test through its finally: litex_term,
     # in a session of its own, would otherwise keep the serial port.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
-    parser = argparse.ArgumentParser(description="L4: bare-metal programs on RD68031, under litex_sim.")
+    parser = argparse.ArgumentParser(description="L4: bare-metal programs on RD68031 or RD68041, under litex_sim.")
     parser.add_argument("--variant",   default="standard", help="CPU variant.")
     parser.add_argument("--port",      default=2431, type=int, help="TCP port for the UART.")
     parser.add_argument("--build-dir", default=None, help="Output directory (default: build/<variant>/l4, with the simulation options in its name).")
@@ -91,7 +92,8 @@ def main():
             # The SoC's software, for the programs to build against.
             run(sim_command(args.variant, build, 0, ["--no-compile-gateware"] + sim_options(args)), build,
                 os.path.join(build, "software.log"), "the SoC's software")
-        demo, cputest = build_programs(build, out)
+        rd68041 = args.cpu_type == "rd68041"
+        demo, cputest = build_programs(build, out, "cputest040" if rd68041 else "cputest")
         boot = os.path.join(out, "boot.bin")
         shutil.copy(demo, boot)
 
@@ -133,14 +135,22 @@ def main():
         serial_boot(con, "cputest")
         out = con.expect(r"cputest: (PASS|FAIL).*\n", 1200)
         check("cputest: PASS" in out, "cputest failed")
-        icache = re.search(r"icache: (stale until CI|coherent)", out)
-        dcache = re.search(r"dcache: write allocation coherent, without it (stale until CD|coherent)", out)
-        check(icache and dcache, "cputest: no cache report")
-        cached = args.variant.split("+")[0] != "minimal"
-        check((icache.group(1) == "stale until CI") == cached,
-            "icache: {} on the {} variant".format(icache.group(1), args.variant))
-        check((dcache.group(1) == "stale until CD") == cached,
-            "dcache without write allocation: {} on the {} variant".format(dcache.group(1), args.variant))
+        if rd68041:
+            # Both caches in every variant (CACR enables them, crt0.S).
+            icache = re.search(r"icache: (stale until CINV|coherent)", out)
+            dcache = re.search(r"dcache: copyback (pushed by a cache-inhibited access|stale)", out)
+            check(icache and dcache, "cputest: no cache report")
+            check(icache.group(1) == "stale until CINV", "icache: {}".format(icache.group(1)))
+            check(dcache.group(1) != "stale", "dcache: copyback stale")
+        else:
+            icache = re.search(r"icache: (stale until CI|coherent)", out)
+            dcache = re.search(r"dcache: write allocation coherent, without it (stale until CD|coherent)", out)
+            check(icache and dcache, "cputest: no cache report")
+            cached = args.variant.split("+")[0] != "minimal"
+            check((icache.group(1) == "stale until CI") == cached,
+                "icache: {} on the {} variant".format(icache.group(1), args.variant))
+            check((dcache.group(1) == "stale until CD") == cached,
+                "dcache without write allocation: {} on the {} variant".format(dcache.group(1), args.variant))
         fpu = re.search(r"fpu: (present|absent)", out)
         check(fpu, "cputest: no FPU report")
         check((fpu.group(1) == "present") == ("+fpu" in args.variant),

@@ -17,8 +17,8 @@
 | 70-73  TCI: a device register read twice through a cachable mode, then
 |        through DTT0's noncachable one, is read from the device each time
 | 80-83  a line read in wrap order: a miss at a line's third long word (UM 7.4.2)
-| 84-87  a line write: a copyback line pushed (CPUSHL, UM 4.6.1, 7.4.3)
-| 88-91  MOVE16: a line read and a line write (UM 7.4.2-7.4.3, TT = 1)
+| 84-87  a line write: a copyback line pushed (CPUSHL, UM 4.2, 7.4.4)
+| 88-91  MOVE16: a line read and a line write (UM 7.4.2, 7.4.4, TT = 1)
 
 #include "bench.inc"
 
