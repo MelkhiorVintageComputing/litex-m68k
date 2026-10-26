@@ -70,14 +70,14 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | `sim/litex/fpswitch/` | two FPU tasks switched by timer0, the FPU saved as Linux does (`fpswitch_test.py`); the reduction of L7's FSAVE freeze |
 | `sim/litex/cputest040/` | L13: cputest for RD68041 (the 040's frames, MMU, copyback, FPU traps); the tests take `--cpu-type rd68041` (`CPU=rd68041` in the Makefile) |
 | `sim/litex/trace/` | debugging only: RD68041's user-mode trace in litex_sim (`RD68041_TRACE=1` at build time), which found L15's bug |
-| `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented: `linux/` (the m68k LiteX machine, and its devices from a device tree), `litex/` (json2dts for m68k; the SD card driver's SCR on a big-endian CPU), `gcc/` (m68k soft float: `--with-float=soft`, musl's `-sf` loader, exact `long double`; host tests in `gcc/test/`), `musl/` (setjmp without an FPU), `RD68041/` (instruction fetch stopping at an ATC fault, L15); `RD68884/` has none (L7's fix is upstream) |
+| `patches/<project>/` | patches to `Inputs/` projects or `~/LITEX` repositories, each documented: `linux/` (the m68k LiteX machine, and its devices from a device tree), `litex/` (json2dts for m68k; the SD card driver's SCR on a big-endian CPU), `gcc/` (m68k soft float: `--with-float=soft`, musl's `-sf` loader, exact `long double`; host tests in `gcc/test/`), `musl/` (setjmp without an FPU), `RD68041/` and `RD68884/` have none (L15's and L7's fixes are upstream) |
 | `scripts/setup_venv.sh` | creates `~/LITEX-68K/litex-venv` |
 | `scripts/board.py` | load a bitstream snapshot, stop the BIOS, boot a kernel by serial or from the SD card, a console; `--until`/`--send` for unattended runs (`doc/board.md`) |
 | `scripts/snapshot_bitstream.sh` | copies a board build (bitstream, CSR maps, software) to `~/LITEX-68K/bitstreams/NAME` |
 | `scripts/patch_litex.sh` | makes `~/LITEX-68K/litex` (or another LiteX repository) from `~/LITEX` and `patches/litex`; `setup_venv.sh` then prefers it |
 | `scripts/patch_rd68884.sh` | when `patches/RD68884` has patches: makes `~/LITEX-68K/RD68884`, `Inputs/RD68884` with them and its microcode regenerated |
-| `scripts/patch_rd68041.sh` | makes `~/LITEX-68K/RD68041`, `Inputs/RD68041` with `patches/RD68041` |
-| `scripts/sync_pythondata_rd68041.sh` | fills `../pythondata-cpu-rd68041` from that patched copy (or `Inputs/RD68041` with no patches) |
+| `scripts/patch_rd68041.sh` | when `patches/RD68041` has patches: makes `~/LITEX-68K/RD68041`, `Inputs/RD68041` with them |
+| `scripts/sync_pythondata_rd68041.sh` | fills `../pythondata-cpu-rd68041` from `Inputs/RD68041` (or its patched copy) |
 | `scripts/sync_pythondata.sh` | fills `../pythondata-cpu-rd68031` from `Inputs/RD68031`, and the FPU from `Inputs/RD68884` (or its patched copy, `scripts/patch_rd68884.sh`) |
 | `../pythondata-cpu-rd68031` | the RD68031 and RD68884 RTL snapshot LiteX builds from (`get_data_mod("cpu", "rd68031")`) |
 | `../pythondata-cpu-rd68041` | RD68041's (`get_data_mod("cpu", "rd68041")`) |

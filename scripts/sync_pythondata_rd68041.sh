@@ -35,9 +35,11 @@ if [ -n "$PATCHES" ]; then
     "$HERE/scripts/patch_rd68041.sh" "$SRC"
     PY_NOTE="with litex-68k's patches/RD68041 (patches) applied"
     MD_NOTE=", with litex-68k's \`patches/RD68041\` (\`$PKG.patches\`) applied"
+    PATCH_LIST=$(printf 'patches = [\n%s\n]' "$(echo "$PATCHES" | sed 's/.*/    "&",/')")
 else
     PY_NOTE="as it is"
     MD_NOTE=""
+    PATCH_LIST="patches = []"
 fi
 
 SOURCES=$(make -s -C "$SRC" --no-print-directory print-rtl | tr ' ' '\n' | sed '/^$/d')
@@ -74,9 +76,7 @@ data_git_describe = "$DESCRIBE"
 data_git_msg = """\\
 $MSG
 """
-patches = [
-$(echo "$PATCHES" | sed '/^$/d; s/.*/    "&",/')
-]
+$PATCH_LIST
 
 # The RTL, relative to data_location, in compile order (packages first). The top
 # is rd68041_top; its parameter FPU is 1 for the MC68040, 0 for the MC68LC040.

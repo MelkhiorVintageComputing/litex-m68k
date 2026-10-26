@@ -900,7 +900,7 @@ are the MC68040 user's manual (UM below) and what was seen here
     before returning. Linux flushes only the faulting page's entry, by its
     PTEST.
   - RD68041 had a defect here, fixed in the `-p1` bitstreams
-    (`patches/RD68041` 0001): an instruction fetch went on past an ATC fault,
+    (RD68041 4d7a921): an instruction fetch went on past an ATC fault,
     and so left a not-resident entry for the *next* page too.
 - **Exceptions:**
   - Access errors are format $7 (UM 8.4.6). The SSW is at +$C and the FA at

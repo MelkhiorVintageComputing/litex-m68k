@@ -194,12 +194,14 @@ MC68LC040 with `FPU = 0`):
 - L12-L13: the LiteX CPU class, the BIOS, and cputest040 in litex_sim.
 - L14: the Wukong at 25 MHz, both variants.
 - L15: Linux with RD68031's userspace, one kernel for the 030 and the 040. It
-  found a defect in RD68041's instruction fetch, `patches/RD68041` 0001.
+  found a defect in RD68041's instruction fetch, fixed upstream (RD68041
+  4d7a921).
 - L16: buildroot built for the 68040 (`litex_rd68041_{fpu,nofpu}_defconfig`).
 - L17: the documentation.
 
 **Later, noted.** Upstreaming `arch/m68k/litex`, `patches/litex`, `patches/gcc`,
-`patches/musl` (the RD68884 fix is upstream: 7a188db), `patches/RD68041`.
+`patches/musl` (the RD68884 and RD68041 fixes are upstream: 7a188db,
+4d7a921).
 
 **Later (out of this plan's scope, noted for design choices now):**
 - Hard CPU: reuse the bridge as the FPGA-side slave with pin I/O + synchronisers;

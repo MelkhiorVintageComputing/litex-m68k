@@ -44,9 +44,10 @@ devices, map, interrupts and BIOS:
 - `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-p1/`: the
   MC68LC040, no FPU.
 
-`-p1` means `patches/RD68041` 0001 is in them. The earlier
-`wukong-rd68041-fpu-eth-sd-25m/` is without it: it runs the BIOS and bare
-metal, but Linux with glibc dies at init.
+`-p1` means L15's fix to the instruction fetch is in them: then
+`patches/RD68041` 0001, now upstream as RD68041 4d7a921, the same RTL. The
+earlier `wukong-rd68041-fpu-eth-sd-25m/` is without it: it runs the BIOS and
+bare metal, but Linux with glibc dies at init.
 
 A kernel for them must know the 68040: its caches are copyback-capable and
 pushed with CPUSH, I/O wants a TTR or noncachable pages, and the FPU leaves

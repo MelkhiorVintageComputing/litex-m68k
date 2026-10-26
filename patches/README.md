@@ -22,8 +22,9 @@ One subdirectory per project, named after it (`patches/litex/`, `patches/RD68031
   buildroot (L9, `doc/l9-nofpu.md`).
 - `musl/`: musl 1.2.6, m68k's setjmp and longjmp without FPU registers in
   the soft-float ABI (L9, `doc/l9-nofpu.md`).
-- `RD68041/`: the instruction fetch stopping at an ATC fault, which Linux
-  needs (L15); `scripts/patch_rd68041.sh` makes the copy.
+- `RD68041/`: none now. L15's fix, the instruction fetch stopping at an ATC
+  fault, is upstream, RD68041 4d7a921 (`doc/l11-rd68041.md`).
+  `scripts/patch_rd68041.sh` applies any that come.
 - `RD68884/`: none now. L7's fix for FSAVE during the release of a
   register-to-register instruction was replaced by upstream's own, RD68884
   7a188db (`doc/l7-linux.md`). `scripts/patch_rd68884.sh` applies any that come.
