@@ -39,15 +39,17 @@ the FPU (`--bitstream` selects it), for software built for soft float.
 
 **RD68041**, an MC68040, at 25 MHz (`doc/l11-rd68041.md`), with the same
 devices, map, interrupts and BIOS:
-- `~/LITEX-68K/bitstreams/wukong-rd68041-fpu-eth-sd-25m-p1/`: the MC68040,
-  FPU included.
-- `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-p1/`: the
+- `~/LITEX-68K/bitstreams/wukong-rd68041-fpu-eth-sd-25m-4300689/`: the
+  MC68040, FPU included.
+- `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-4300689/`: the
   MC68LC040, no FPU.
 
-`-p1` means L15's fix to the instruction fetch is in them: then
-`patches/RD68041` 0001, now upstream as RD68041 4d7a921, the same RTL. The
-earlier `wukong-rd68041-fpu-eth-sd-25m/` is without it: it runs the BIOS and
-bare metal, but Linux with glibc dies at init.
+`-4300689` is the RD68041 commit they are built from. It has both of the
+fixes to the instruction fetch that Linux and NetBSD needed
+(`doc/l11-rd68041.md`). The older snapshots:
+- `-p1` has the first fix only. NetBSD's install ramdisk froze it.
+- `wukong-rd68041-fpu-eth-sd-25m/` has neither: it runs the BIOS and bare
+  metal, but Linux with glibc dies at init.
 
 A kernel for them must know the 68040: its caches are copyback-capable and
 pushed with CPUSH, I/O wants a TTR or noncachable pages, and the FPU leaves
@@ -134,14 +136,10 @@ driving the console: logging in, running commands, checking answers.
 
 ## The SD card
 
-- **Its current contents** (made by `l7_test.py --cpu-type rd68041
-  --sd-install`, `doc/l11-rd68041.md`):
-  - p1, FAT: `boot.json` and the MC68040 Linux kernel (68040 buildroot), with
-    `soc.dtb`, `params.bin` and `litexboot.bin` built for
-    `wukong-rd68041-fpu-eth-sd-25m-p1`; `nofpu/vmlinux`, the LC040's kernel;
-  - p2, ext2: the MC68040 buildroot's root filesystem (glibc);
-  - p3, ext2: the MC68LC040's (musl).
-  - The NetBSD filesystems that were there before are gone.
+- **Its current contents:** NetBSD for RD68041, set up by hand (two
+  partitions, p1 and p2), to check RD68041's fixes. Keep it. The Linux
+  installation that `l7_test.py --sd-install` made earlier
+  (`doc/l11-rd68041.md`) is gone.
 - **Tests that keep the card:** `l7_test.py --io --no-sd` (Ethernet only).
   Plain `--io` and `--sd-install` overwrite it.
 - **While p1 holds a `boot.json`, every load boots from the card**,
