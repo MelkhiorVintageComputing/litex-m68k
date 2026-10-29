@@ -39,14 +39,15 @@ the FPU (`--bitstream` selects it), for software built for soft float.
 
 **RD68041**, an MC68040, at 25 MHz (`doc/l11-rd68041.md`), with the same
 devices, map, interrupts and BIOS:
-- `~/LITEX-68K/bitstreams/wukong-rd68041-fpu-eth-sd-25m-4300689/`: the
+- `~/LITEX-68K/bitstreams/wukong-rd68041-fpu-eth-sd-25m-c5ba651/`: the
   MC68040, FPU included.
-- `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-4300689/`: the
+- `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-c5ba651/`: the
   MC68LC040, no FPU.
 
-`-4300689` is the RD68041 commit they are built from. It has both of the
-fixes to the instruction fetch that Linux and NetBSD needed
-(`doc/l11-rd68041.md`). The older snapshots:
+`-c5ba651` is the RD68041 commit they are built from. It is M15, faster
+reads and writes, and it has both of the fixes to the instruction fetch that
+Linux and NetBSD needed (`doc/l11-rd68041.md`). The older snapshots:
+- `-4300689` has both fixes, without M15.
 - `-p1` has the first fix only. NetBSD's install ramdisk froze it.
 - `wukong-rd68041-fpu-eth-sd-25m/` has neither: it runs the BIOS and bare
   metal, but Linux with glibc dies at init.

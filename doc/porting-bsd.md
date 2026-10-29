@@ -859,7 +859,7 @@ Bitstreams to use:
 
 ## 9. RD68041: the same SoC with an MC68040
 
-`~/LITEX-68K/bitstreams/wukong-rd68041-{fpu,nofpu}-eth-sd-25m-4300689` (`doc/board.md`)
+`~/LITEX-68K/bitstreams/wukong-rd68041-{fpu,nofpu}-eth-sd-25m-c5ba651` (`doc/board.md`)
 run RD68041, an MC68040, or an MC68LC040 without its FPU, at 25 MHz. The
 memory map, the CSRs, the interrupts (IPL 2, autovector 26), the devices,
 litexboot and the bootinfo are the same, but for what follows. The sources
@@ -899,7 +899,7 @@ are the MC68040 user's manual (UM below) and what was seen here
   - So a handler that makes a page resident must PFLUSH that page's entry
     before returning. Linux flushes only the faulting page's entry, by its
     PTEST.
-  - RD68041 had two defects here, both fixed in the `-4300689` bitstreams.
+  - RD68041 had two defects here, both fixed since the `-4300689` bitstreams.
     The second (RD68041 4300689) froze NetBSD's install ramdisk: an
     instruction whose extension words crossed into a page not yet mapped
     waited for them forever, instead of taking the fault. The first (RD68041
