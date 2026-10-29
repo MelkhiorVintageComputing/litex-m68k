@@ -32,14 +32,23 @@ static inline void irq_setie(unsigned int ie)
 		__asm__ __volatile__ ("ori.w #0x0700, %%sr" : : : "memory");  /* mask 7 */
 }
 
+/* With two processors ("+smp", core.py), each has a mask of its own:
+ * cpu_irq_mask is CPU 0's, cpu_irq_mask1 CPU 1's. */
+#ifdef __rd68041_smp__
+#include <smp.h>
+#define RD68041_IRQ_MASK_ADDR (smp_whoami() ? CSR_CPU_IRQ_MASK1_ADDR : CSR_CPU_IRQ_MASK_ADDR)
+#else
+#define RD68041_IRQ_MASK_ADDR CSR_CPU_IRQ_MASK_ADDR
+#endif
+
 static inline unsigned int irq_getmask(void)
 {
-	return csr_read_simple(CSR_CPU_IRQ_MASK_ADDR);
+	return csr_read_simple(RD68041_IRQ_MASK_ADDR);
 }
 
 static inline void irq_setmask(unsigned int mask)
 {
-	csr_write_simple(mask, CSR_CPU_IRQ_MASK_ADDR);
+	csr_write_simple(mask, RD68041_IRQ_MASK_ADDR);
 }
 
 static inline unsigned int irq_pending(void)

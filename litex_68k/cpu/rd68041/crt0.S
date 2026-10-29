@@ -39,6 +39,21 @@ _vectors:
         .globl  _start
 _start:
         move.w  #0x2700, %sr            | supervisor, interrupts masked
+#ifdef __rd68041_smp__
+        | Two processors (core.py "+smp"): both reset into this ROM. CPU 1
+        | (WHOAMI non-zero) touches nothing of the BIOS's: it waits for
+        | BOOT_PC, takes BOOT_SP, and goes there (smp.h, smp_start_cpu1). The
+        | board's registers are in the I/O region; out of reset the caches are
+        | off, and the board answers with TCI anyway.
+        tst.l   SMP_WHOAMI
+        beq.s   1f
+0:      move.l  SMP_BOOT_PC, %d0
+        beq.s   0b
+        movea.l SMP_BOOT_SP, %sp
+        movea.l %d0, %a0
+        jmp     (%a0)
+1:
+#endif
         move.l  #_fstack, %sp
         lea     _vectors, %a0
         movec   %a0, %vbr

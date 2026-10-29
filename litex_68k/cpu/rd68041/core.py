@@ -26,11 +26,21 @@ crosses to sys. RD68041 makes about 30 MHz on an Artix-7, out of context.
 
 An access nobody answers is a bus error (TEA) after BUS_TIMEOUT clocks, from
 WishboneErrorTimeout on the sys side, as RD68031's.
+
+"+smp" (L20, doc/l18-smp.md): two processors on one MC68040 bus, the board of
+litex_68k/m68040_smp.py (RD68041's doc/smp.md, setup A) in front of the same
+bridge: the fairness arbiter, the MI gate, and the board's registers at
+$FFFF_0000 (WHOAMI, the interprocessor interrupts at level 5, CPU 1's release
+and entry, the bus counters). CPU 1 stays in reset until software releases it;
+crt0.S then sends it to BOOT_PC. LiteX's interrupts reach each CPU through a
+mask of its own: cpu_irq_mask is CPU 0's, cpu_irq_mask1 CPU 1's (irq.h picks
+by WHOAMI). Software is built with -D__rd68041_smp__.
 """
 
 import os
 
 from migen import *
+from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
 
@@ -40,14 +50,17 @@ from litex.soc.interconnect.csr import CSRStatus, CSRStorage
 from litex.soc.cores.cpu import CPU
 
 from litex_68k.m68040_bus import m68040_bus_layout, M68040ToFIFOToSoC
+from litex_68k.m68040_smp import M68040SMPBus, m68040_pins_layout, rd68041_smp_params, IPI_LEVEL
 from litex_68k.cpu.rd68031.core import IRQ_LEVEL, BUS_TIMEOUT, WishboneErrorTimeout, cpu_domain_reset
 
 # Variants -----------------------------------------------------------------------------------------
 
-# standard: the MC68LC040; +fpu: the MC68040.
+# standard: the MC68LC040; +fpu: the MC68040; +smp: two of them on one bus.
 CPU_VARIANTS = {
-    "standard":     dict(fpu=False),
-    "standard+fpu": dict(fpu=True),
+    "standard":         dict(fpu=False, smp=False),
+    "standard+fpu":     dict(fpu=True,  smp=False),
+    "standard+smp":     dict(fpu=False, smp=True),
+    "standard+fpu+smp": dict(fpu=True,  smp=True),
 }
 
 # RD68041 ------------------------------------------------------------------------------------------
@@ -85,6 +98,8 @@ class RD68041(CPU):
         # compiler-rt, as for RD68031 without RD68884 (rd68031/core.py).
         if not CPU_VARIANTS[self.variant]["fpu"]:
             flags += "-msoft-float "
+        if CPU_VARIANTS[self.variant]["smp"]:
+            flags += "-D__rd68041_smp__ "
         return flags
 
     def __init__(self, platform, variant="standard"):
@@ -101,9 +116,16 @@ class RD68041(CPU):
         # The MC68040 bus, and the bridge, from the CPU's clock domain to sys.
         cd   = self.clock_domain
         fpu  = CPU_VARIANTS[variant]["fpu"]
+        self.smp = smp = CPU_VARIANTS[variant]["smp"]
         m68k = Record(m68040_bus_layout)
         sys_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
-        self.bridge  = M68040ToFIFOToSoC(m68k, sys_bus, cd=cd, io_regions=self.io_regions)
+        if smp:
+            cpus = [Record(m68040_pins_layout, name="rd68041_cpu{}".format(i)) for i in range(2)]
+            self.board  = board = ClockDomainsRenamer(cd)(M68040SMPBus(cpus, m68k))
+            self.bridge = M68040ToFIFOToSoC(m68k, sys_bus, cd=cd, io_regions=self.io_regions,
+                                            mi_n=board.mi_n, ignore=board.ignore)
+        else:
+            self.bridge = M68040ToFIFOToSoC(m68k, sys_bus, cd=cd, io_regions=self.io_regions)
         self.timeout = WishboneErrorTimeout(sys_bus, self.bus, BUS_TIMEOUT)
 
         # Interrupts: every unmasked line raises IRQ_LEVEL. IPL is asynchronous
@@ -116,6 +138,10 @@ class RD68041(CPU):
         self.sync += ipl.eq(Mux((self.interrupt & self.irq_mask.storage) != 0, IRQ_LEVEL, 0))
 
         reset = cpu_domain_reset(self, self.reset, cd)
+        if smp:
+            self.add_smp(platform, cd, fpu, cpus, board, reset)
+            self.add_sources(platform)
+            return
 
         # The processor is the only master: the bus granted to it for good, no
         # snooping (SC = 00, UM Table 4-1), and its bidirectional pins' inputs
@@ -185,6 +211,33 @@ class RD68041(CPU):
         # Add Verilog sources.
         self.add_sources(platform)
 
+    def add_smp(self, platform, cd, fpu, cpus, board, reset):
+        """The two processors on the board. Each one's IPL: its interprocessor
+        interrupt (level 5), else LiteX's lines that its mask lets through
+        (IRQ_LEVEL). The mask is applied in sys, the request synchronised into
+        the CPUs' domain and combined there in a register, so that the IPL
+        never glitches. CPU 1 is held in reset (RSTI) until RELEASE."""
+        self.irq_mask1 = CSRStorage(32, description="Interrupt lines that may interrupt CPU 1.")
+        masks  = [self.irq_mask.storage, self.irq_mask1.storage]
+        lx     = [Signal(name="lx_irq{}".format(i)) for i in range(2)]
+        lx_cpu = [Signal(name="lx_irq{}_cpu".format(i)) for i in range(2)]
+        ipl_n  = [Signal(3, reset=0b111, name="ipl{}_n".format(i)) for i in range(2)]
+        sync_cd = getattr(self.sync, cd)
+        for i in range(2):
+            self.sync += lx[i].eq((self.interrupt & masks[i]) != 0)
+            self.specials += MultiReg(lx[i], lx_cpu[i], cd)
+            sync_cd += ipl_n[i].eq(~Mux(board.devices.ipi[i], IPI_LEVEL,
+                                        Mux(lx_cpu[i], IRQ_LEVEL, 0)))
+        rst = Signal()
+        self.comb += [
+            rst.eq(ResetSignal(cd) | reset),
+            cpus[0].rsti_n.eq(~rst),
+            cpus[1].rsti_n.eq(~rst & board.devices.release),
+        ]
+        self.cpu_params_smp = [rd68041_smp_params(pins, board, fpu, clk=ClockSignal(cd),
+                                                  rst_n=~rst, ipl_n=ipl_n[i])
+                               for i, pins in enumerate(cpus)]
+
     def add_soc_components(self, soc):
         # Main RAM's region, once add_sdram has made it (add_memory_buses).
         self.soc_regions = soc.bus.regions
@@ -218,6 +271,10 @@ class RD68041(CPU):
             platform.add_source(os.path.join(rd68041.data_location, f), "systemverilog")
 
     def do_finalize(self):
+        if self.smp:
+            for i, params in enumerate(self.cpu_params_smp):
+                self.specials += Instance("rd68041_top", name="rd68041_cpu{}".format(i), **params)
+            return
         self.specials += Instance("rd68041_top", **self.cpu_params)
         # litex_sim, debugging only: RD68041_TRACE=1 at build time adds
         # sim/litex/trace/rd68041_trace.sv, a trace of user mode on stdout.
