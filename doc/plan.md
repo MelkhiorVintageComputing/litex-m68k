@@ -199,6 +199,20 @@ MC68LC040 with `FPU = 0`):
 - L16: buildroot built for the 68040 (`litex_rd68041_{fpu,nofpu}_defconfig`).
 - L17: the documentation.
 
+**L18-L22 — two RD68041s on one bus.** *In litex_sim, and a Wukong bitstream,
+not yet run on the board: `doc/l18-smp.md`.* RD68041's two-processor board
+(its `doc/smp.md`, setup A) for the LiteX BIOS and bare metal; no m68k Linux
+does SMP:
+- L18: the board in Migen (`litex_68k/m68040_smp.py`): the corrected UM
+  7.8.2.1 arbiter, the bus resolved, the MI gate, the board's registers and
+  counters; `sim/unit`, and the arbiter against RD68041's own under iverilog.
+- L19: two cores on the L1 bench, running RD68041's `m14_smp.S`.
+- L20: the `+smp` CPU variants, CPU 1's start in crt0, a mask per CPU, smptest
+  in litex_sim.
+- L21: the Wukong: two MC68LC040s with Ethernet and SD (two MC68040s are 112 %
+  of the LUTs).
+- L22: the documentation.
+
 **Later, noted.** Upstreaming `arch/m68k/litex`, `patches/litex`, `patches/gcc`,
 `patches/musl` (the RD68884 and RD68041 fixes are upstream: 7a188db,
 2d6eb14 and 4300689).
