@@ -210,7 +210,8 @@ does SMP:
 - L20: the `+smp` CPU variants, CPU 1's start in crt0, a mask per CPU, smptest
   in litex_sim.
 - L21: the Wukong: two MC68LC040s with Ethernet and SD (two MC68040s are 112 %
-  of the LUTs).
+  of the LUTs); on the board, the BIOS, cputest040 and smptest (256
+  iterations too) pass, every bus check at 0.
 - L22: the documentation.
 
 **Later, noted.** Upstreaming `arch/m68k/litex`, `patches/litex`, `patches/gcc`,

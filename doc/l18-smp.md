@@ -220,6 +220,32 @@ once): there, the line fills' latency, not the shared bus, sets the pace.
 The two MC68LC040s are `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-smp-eth-sd-25m-c5ba651`,
 with Ethernet and the SD card as the uniprocessor bitstreams have.
 
+**On the board**, each run from `board.py prompt` (cputest and smptest stop
+the CPU when they end, so the bitstream is reloaded between runs), the SD card
+(NetBSD's) untouched:
+
+```sh
+scripts/board.py prompt --bitstream ~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-smp-eth-sd-25m-c5ba651 --speed 1000000
+sim/litex/smp_test.py --variant standard+smp --serial /dev/ttyUSB0 --speed 1000000 \
+    --build-dir build/qmtech_wukong_rd68041_smp_25m_1m_io [--iters N] [--negative]
+```
+
+| Run | Result |
+|---|---|
+| the BIOS on CPU 0, CPU 1 in reset | memtest OK; memspeed 11.9/10.7 MiB/s (write/read) |
+| cputest040 on CPU 0 (`l4_test.py --serial`) | PASS, 81 checks |
+| smptest, 16 iterations | PASS, 45 checks; 16,943 and 10,572 transfers, 233 locked sequences, the longest wait for a grant 81 clocks |
+| smptest, 256 iterations | PASS, 285 checks; 3,114 locked sequences, the longest wait 78 clocks |
+| smptest `--negative` | fails at $400 alone, as it must |
+
+Contention, turnaround, owner, atomicity and intervene stay 0 in every run.
+
+Reading 64 KiB takes CPU 0 589,128 sys clocks alone (about 11 MB/s at
+100 MHz); with both reading at once, 560,600 for CPU 0 and 588,680 for CPU 1.
+As in litex_sim, the shared bus does not slow either one: each line fill's
+latency in the bridge and LiteDRAM leaves the bus idle most of the time, so
+two processors read about twice as much as one.
+
 ## The software rules (setup A, from RD68041's doc/smp.md)
 
 - **Shared pages:** every page both processors use is write-through with
