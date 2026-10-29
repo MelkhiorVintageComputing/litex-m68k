@@ -9,7 +9,10 @@ bridge is M68030ToFIFOToSoC instead (litex_68k/m68030_fifo.py), the processor
 on a clock of its own ("cpu"), unrelated to sys, where everything else is.
 With --cpu rd68041, the processor is RD68041 (an MC68040; --fpu 0, the
 MC68LC040) behind M68040ToFIFOToSoC (litex_68k/m68040_bus.py), on its own
-clock as with --bridge fifo. The map:
+clock as with --bridge fifo. With --smp too (L19), two RD68041s on one bus
+(litex_68k/m68040_smp.py: the arbiter, the MI gate, the board's devices at
+$FFFF_0000) in front of that bridge; the bus counters are the top's
+stat_<name> outputs. The map:
 
     $0000_0000  RAM (--ram-size), loaded at run time from the file named by the
                 +ram= plusarg (one 32-bit big-endian word per line, $readmemh)
@@ -46,6 +49,8 @@ from litex.build.sim.common import sim_special_overrides
 from litex_68k.m68030_bus import m68030_bus_layout, M68030ToWishbone
 from litex_68k.m68030_fifo import M68030ToFIFOToSoC
 from litex_68k.m68040_bus import m68040_bus_layout, M68040ToFIFOToSoC
+from litex_68k.m68040_smp import (M68040SMPBus, m68040_pins_layout, rd68041_smp_params, STATS,
+    IPI_LEVEL)
 from litex_68k.cpu.rd68031.core import WishboneErrorTimeout
 
 # Test device --------------------------------------------------------------------------------------
@@ -274,6 +279,44 @@ class Bench040(BenchBase):
             o_tdo_oe     = Open(),
         )
 
+class Bench040SMP(BenchBase):
+    """Two RD68041s on one MC68040 bus (M68040SMPBus: setup A, the corrected
+    fairness arbiter, the MI gate, the board's devices), behind
+    M68040ToFIFOToSoC, on clock domain "cpu". CPU 1 stays in reset until the
+    devices' RELEASE; each processor's IPL is its interprocessor interrupt.
+    `mi_gate` False and `gapless` True break the board, for negative runs."""
+    def __init__(self, ram_size=0x40000, fpu=1, timeout=256, mi_gate=True, gapless=False):
+        self.cd_sys = ClockDomain()
+        self.cd_cpu = ClockDomain()
+
+        # # #
+
+        bus  = Record(m68040_bus_layout)
+        cpus = [Record(m68040_pins_layout, name="cpu{}".format(i)) for i in range(2)]
+        self.board = board = ClockDomainsRenamer("cpu")(
+            M68040SMPBus(cpus, bus, gapless=gapless, mi_gate=mi_gate))
+        io_regions = {0x8000_0000: 0x8000_0000}  # As LiteX's.
+        wb = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+        self.bridge  = M68040ToFIFOToSoC(bus, wb, cd="cpu", io_regions=io_regions,
+                                         mi_n=board.mi_n, ignore=board.ignore)
+        master = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+        self.timeout = WishboneErrorTimeout(wb, master, timeout)
+        self.add_soc(master, ram_size)
+
+        rst = ResetSignal("cpu")
+        self.comb += [
+            cpus[0].rsti_n.eq(~rst),
+            cpus[1].rsti_n.eq(~rst & board.devices.release),
+        ]
+        for i, pins in enumerate(cpus):
+            self.specials += Instance("rd68041_top", **rd68041_smp_params(pins, board, fpu,
+                clk=ClockSignal("cpu"), rst_n=~rst,
+                ipl_n=~Mux(board.devices.ipi[i], IPI_LEVEL, 0)))
+
+        # The counters, for tb.sv.
+        self.stats = {name: Signal(32, name="stat_" + name) for name in STATS}
+        self.comb += [self.stats[n].eq(board.stats[n]) for n in STATS]
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
@@ -287,9 +330,16 @@ def main():
     parser.add_argument("--cpu",      default="rd68031", choices=["rd68031", "rd68041"],
                         help="The processor; rd68041 is always behind its FIFO bridge.")
     parser.add_argument("--fpu",      default=1, type=int, help="RD68041's FPU parameter (0: MC68LC040).")
+    parser.add_argument("--smp",      action="store_true", help="Two RD68041s on one bus (L19).")
+    parser.add_argument("--no-mi-gate", action="store_true", help="--smp, negative run: no MI gate.")
+    parser.add_argument("--gapless",  action="store_true", help="--smp, negative run: the printed arbiter's grants.")
     args = parser.parse_args()
 
-    if args.cpu == "rd68041":
+    if args.cpu == "rd68041" and args.smp:
+        args.bridge = "fifo"
+        bench = Bench040SMP(ram_size=args.ram_size, fpu=args.fpu, mi_gate=not args.no_mi_gate,
+                            gapless=args.gapless)
+    elif args.cpu == "rd68041":
         args.bridge = "fifo"
         bench = Bench040(ram_size=args.ram_size, fpu=args.fpu)
     else:
@@ -303,6 +353,8 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     if args.bridge == "fifo":
         ios |= {bench.cd_cpu.clk, bench.cd_cpu.rst}
+    if args.smp:
+        ios |= set(bench.stats.values())
     convert(bench, ios=ios, name="bench", special_overrides=sim_special_overrides).write(args.output)
 
 if __name__ == "__main__":

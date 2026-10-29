@@ -223,8 +223,8 @@ class M68040SMPBus(LiteXModule):
 
     `bus` is the bridge's side (m68040_bus_layout, litex_68k/m68040_bus.py):
     this drives its processor-side fields from the resolved bus and takes what
-    the bridge drives. `cpu_inputs(i)` gives the resolved bus as processor i's
-    bussed inputs, for rd68041_top's parameters. `mi_n` is memory's MI (both
+    the bridge drives. `cpu_inputs()` gives the resolved bus as the
+    processors' bussed inputs, for rd68041_top's parameters. `mi_n` is memory's MI (both
     processors', gated) for the bridge; `ignore` is the devices' window, which
     the bridge must leave to them."""
     def __init__(self, cpus, bus, use_locke=True, gapless=False, mi_gate=True):
@@ -316,8 +316,9 @@ class M68040SMPBus(LiteXModule):
         ]
         self.comb  += self.tci_n.eq(bus.tci_n & dev.tci_n)
 
-    def cpu_inputs(self, i):
-        """rd68041_top's bussed inputs for processor i: the resolved bus."""
+    def cpu_inputs(self):
+        """rd68041_top's bussed inputs, the same for both processors: the
+        resolved bus."""
         return dict(
             i_a_i     = self.a,      i_d_i    = self.d,      i_tt_i  = self.tt,
             i_rw_i    = self.rw,     i_siz_i  = self.siz,    i_ts_n_i = self.ts_n,
@@ -389,3 +390,48 @@ class M68040SMPBus(LiteXModule):
                 waits[i].eq(waits[i] + 1)).Else(waits[i].eq(0))
         self.sync += If(clear, stats["maxwait"].eq(0)).Else(
             *[If(waits[i] > stats["maxwait"], stats["maxwait"].eq(waits[i])) for i in range(2)])
+
+# A processor on the board --------------------------------------------------------------------------
+
+def rd68041_smp_params(pins, board, fpu, clk, rst_n, ipl_n):
+    """rd68041_top's parameters for one processor of the board: its outputs to
+    `pins` (m68040_pins_layout), its bussed inputs from the resolved bus
+    (`board.cpu_inputs`), its own BG and RSTI from `pins`. `rst_n` is the
+    core's asynchronous initialisation (RD68041 doc/pinout.md), `ipl_n` its
+    IPL2-IPL0. AVEC comes with the bridge's TA on every acknowledge; DLE is
+    low (normal mode); CDIS and MDIS negated; PCLK, PST and JTAG unused."""
+    from litex.gen import Open
+    return dict(
+        p_FPU        = int(fpu),
+        i_clk        = clk,
+        i_pclk       = 0,
+        i_rst_n      = rst_n,
+        i_rsti_n_i   = pins.rsti_n,
+        o_rsto_n_o   = Open(),
+        o_a_o        = pins.a_o,      o_a_oe      = pins.a_oe,
+        o_d_o        = pins.d_o,      o_d_oe      = pins.d_oe,
+        o_tt_o       = pins.tt_o,     o_tm_o      = pins.tm_o,
+        o_tln_o      = Open(),        o_upa_o     = pins.upa_o,
+        o_rw_o       = pins.rw_o,     o_siz_o     = pins.siz_o,
+        o_lock_n_o   = pins.lock_n_o, o_locke_n_o = pins.locke_n_o,
+        o_ciout_n_o  = pins.ciout_n_o, o_attr_oe  = pins.attr_oe,
+        o_ts_n_o     = pins.ts_n_o,   o_ts_oe     = pins.ts_oe,
+        o_tip_n_o    = pins.tip_n_o,  o_tip_oe    = pins.tip_oe,
+        o_ta_n_o     = pins.ta_n_o,   o_ta_oe     = pins.ta_oe,
+        i_dle_i      = 0,
+        o_mi_n_o     = pins.mi_n_o,
+        o_br_n_o     = pins.br_n_o,   i_bg_n_i    = pins.bg_n_i,
+        o_bb_n_o     = pins.bb_n_o,   o_bb_oe     = pins.bb_oe,
+        i_cdis_n_i   = 1,
+        i_mdis_n_i   = 1,
+        i_ipl_n_i    = ipl_n,
+        o_ipend_n_o  = Open(),
+        o_pst_o      = Open(),
+        i_tck_i      = 0,
+        i_tms_i      = 1,
+        i_tdi_i      = 1,
+        i_trst_n_i   = 0,
+        o_tdo_o      = Open(),
+        o_tdo_oe     = Open(),
+        **board.cpu_inputs(),
+    )
