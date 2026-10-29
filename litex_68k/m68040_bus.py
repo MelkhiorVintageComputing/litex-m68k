@@ -113,8 +113,19 @@ class M68040ToFIFO(LiteXModule):
       acknowledge (TM = the level, A = $FFFFFFFF) gets AVEC with TA (UM
       7.5.1.2); a breakpoint acknowledge (TM = 0) TEA, which makes the
       processor take an illegal instruction exception (UM 7.5.2).
+
+    With two processors on the bus (L18, litex_68k/m68040_smp.py):
+    - `mi_n`, memory's MI (both processors', gated): no transfer is terminated
+      while it is asserted (UM 7.9: "the memory unit must wait for each
+      snooping bus master to negate MI before responding"). A read is still
+      requested at once and its answer waits; a write is still posted at once
+      and its TA waits; an acknowledge and a line write wait in MI before
+      their first TA. Once negated for a transfer, MI stays so to its end.
+    - `ignore(a)`, an address window another slave on the bus answers (the
+      board's devices): a normal transfer there is left alone.
+    Without them (one processor), the bridge is as it was.
     """
-    def __init__(self, bus, io_regions={}):
+    def __init__(self, bus, io_regions={}, mi_n=None, ignore=None):
         self.bus      = bus
         self.request  = request  = stream.Endpoint(request_layout(wide=True))
         self.response = response = stream.Endpoint(response_layout())
@@ -178,8 +189,48 @@ class M68040ToFIFO(LiteXModule):
             request.sel.eq(write_sel << Cat(Constant(0, 2), adr[0:2])),
         ]
 
+        # MI: whether memory may terminate a transfer now (always, with one
+        # processor). `after_mi(now, wait)`: `now` if it may, else `wait`.
+        mi_ok = None if mi_n is None else mi_n
+        def after_mi(now, wait):
+            return now if mi_ok is None else [If(mi_ok, *now).Else(*wait)]
+
+        # The transfer, from the bus: acknowledged, requested (a read), or
+        # taken (a write).
+        def dispatch():
+            return [
+                If(ack,
+                    after_mi([
+                        If(bus.tm != 0,
+                            NextValue(avec_n, 0),
+                            NextValue(ta_n, 0),
+                        ).Else(
+                            NextValue(tea_n, 0),
+                        ),
+                        *([] if mi_ok is None else [NextState("IDLE")]),  # from MI
+                    ], [NextState("MI")]),
+                ).Elif(bus.rw,
+                    request.valid.eq(1),
+                    If(request.ready,
+                        NextState("WAIT"),
+                    ).Else(
+                        NextState("READ-REQUEST"),
+                    ),
+                ).Elif(line,
+                    # The first long word is on the bus by the end of C2 (UM
+                    # 7.4.4), so TA may go with it: one each clock from here.
+                    after_mi([
+                        NextValue(ta_n, 0),
+                        NextState("LINE-WRITE"),
+                    ], [NextState("MI")]),
+                ).Else(
+                    NextState("WRITE"),
+                ),
+            ]
+
         self.fsm = fsm = FSM(reset_state="IDLE")
         # A read is requested right away, from the bus.
+        ignored = None if ignore is None else (ignore(bus.a) & ~ack)
         fsm.act("IDLE",
             NextValue(ta_n,   1),
             NextValue(tea_n,  1),
@@ -196,30 +247,23 @@ class M68040ToFIFO(LiteXModule):
                 NextValue(burst, line),
                 NextValue(word, bus.a[2:4]),
                 NextValue(beat, 0),
-                If(ack,
-                    If(bus.tm != 0,
-                        NextValue(avec_n, 0),
-                        NextValue(ta_n, 0),
+                *(dispatch() if ignore is None else [
+                    If(ignored,
+                        # Another slave's (the board's devices).
                     ).Else(
-                        NextValue(tea_n, 0),
+                        *dispatch(),
                     ),
-                ).Elif(bus.rw,
-                    request.valid.eq(1),
-                    If(request.ready,
-                        NextState("WAIT"),
-                    ).Else(
-                        NextState("READ-REQUEST"),
-                    ),
-                ).Elif(line,
-                    # The first long word is on the bus by the end of C2 (UM
-                    # 7.4.4), so TA may go with it: one each clock from here.
-                    NextValue(ta_n, 0),
-                    NextState("LINE-WRITE"),
-                ).Else(
-                    NextState("WRITE"),
-                ),
+                ]),
             ),
         )
+        if mi_ok is not None:
+            # An acknowledge or a line write, waiting for MI: the bus still
+            # holds what dispatch() decodes.
+            fsm.act("MI",
+                If(mi_ok,
+                    *dispatch(),
+                ),
+            )
         fsm.act("READ-REQUEST",
             request.valid.eq(1),
             request.we.eq(0),
@@ -232,6 +276,10 @@ class M68040ToFIFO(LiteXModule):
         )
         # A single write: its data is on the bus from C2 (UM 7.4.3), which this
         # state is at the earliest, until its TA.
+        posted = after_mi([
+            NextValue(ta_n, 0),
+            NextState("IDLE"),
+        ], [NextState("POSTED")])
         fsm.act("WRITE",
             single_write,
             request.dat.eq(Replicate(bus.d_w, 4)),
@@ -241,8 +289,7 @@ class M68040ToFIFO(LiteXModule):
                 If(io,
                     NextState("WAIT"),
                 ).Else(
-                    NextValue(ta_n, 0),
-                    NextState("IDLE"),
+                    *posted,
                 ),
             ).Else(
                 NextState("WRITE-REQUEST"),
@@ -256,11 +303,18 @@ class M68040ToFIFO(LiteXModule):
                 If(io,
                     NextState("WAIT"),
                 ).Else(
-                    NextValue(ta_n, 0),
-                    NextState("IDLE"),
+                    *posted,
                 ),
             ),
         )
+        if mi_ok is not None:
+            # A write posted, its TA waiting for MI.
+            fsm.act("POSTED",
+                If(mi_ok,
+                    NextValue(ta_n, 0),
+                    NextState("IDLE"),
+                ),
+            )
         # A line write: each long word is taken on the edge the processor
         # samples its TA, and the next is on the bus from then on (UM 7.4.4,
         # Figure 7-17). The fourth: TA negated, the line posted.
@@ -289,9 +343,10 @@ class M68040ToFIFO(LiteXModule):
         )
         # The answer. One with another tag is for a transfer this side has given
         # up (its reset): it is dropped.
+        answer = response.valid & (response.tag == tag)
         fsm.act("WAIT",
-            response.ready.eq(1),
-            If(response.valid & (response.tag == tag),
+            response.ready.eq(1 if mi_ok is None else mi_ok),
+            If(answer if mi_ok is None else (answer & mi_ok),
                 NextValue(tag, tag + 1),
                 NextValue(rline, response.dat),
                 NextValue(d_r, Array(response.dat[32*k:32*(k + 1)] for k in range(4))[word]),
@@ -329,7 +384,7 @@ class M68040ToFIFOToSoC(M68kFIFOBridge):
     """M68040ToFIFO in clock domain `cd`, FIFOToSoC (wide) in sys, and the FIFOs
     between them (M68kFIFOBridge, m68k_fifo.py: its reset). `bus` is the
     MC68040 bus, `wishbone_bus` the SoC's side Wishbone master (in sys)."""
-    def __init__(self, bus, wishbone_bus, cd="sys", io_regions={}, depth=8):
+    def __init__(self, bus, wishbone_bus, cd="sys", io_regions={}, depth=8, mi_n=None, ignore=None):
         M68kFIFOBridge.__init__(self,
-            M68040ToFIFO(bus, io_regions=io_regions),
+            M68040ToFIFO(bus, io_regions=io_regions, mi_n=mi_n, ignore=ignore),
             wishbone_bus, cd=cd, wide=True, depth=depth)
