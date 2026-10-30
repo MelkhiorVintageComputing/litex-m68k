@@ -1,4 +1,4 @@
-# L18-L22: two RD68041s on one bus
+# L18-L23: two RD68041s on one bus
 
 Two RD68041s share one MC68040 bus. It runs the LiteX BIOS and bare-metal
 programs: no m68k Linux does SMP.

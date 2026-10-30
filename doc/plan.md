@@ -199,7 +199,7 @@ MC68LC040 with `FPU = 0`):
 - L16: buildroot built for the 68040 (`litex_rd68041_{fpu,nofpu}_defconfig`).
 - L17: the documentation.
 
-**L18-L22 — two RD68041s on one bus.** *In litex_sim, and a Wukong bitstream,
+**L18-L23 — two RD68041s on one bus.** *In litex_sim, and a Wukong bitstream,
 not yet run on the board: `doc/l18-smp.md`.* RD68041's two-processor board
 (its `doc/smp.md`, setup A) for the LiteX BIOS and bare metal; no m68k Linux
 does SMP:

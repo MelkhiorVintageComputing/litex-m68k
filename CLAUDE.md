@@ -50,7 +50,7 @@ memory (a litex_sim `Vsim`, the L1 bench's `Vtb`), may run up to 4 at a time.
 | `doc/plan.md` | the plan: milestones L0-L10 and why |
 | `doc/board.md` | the board for software work: the current bitstream (`~/LITEX-68K/bitstreams/`), `scripts/board.py` to load it and boot a kernel, interactive or unattended |
 | `doc/l11-rd68041.md` | L11-L16: RD68041, from the bridge to Linux, and the core's bug L15 found |
-| `doc/l18-smp.md` | L18-L22: two RD68041s on one bus (setup A), from the arbiter to the Wukong |
+| `doc/l18-smp.md` | L18-L23: two RD68041s on one bus (setup A), from the arbiter to the Wukong, and what NetBSD asked for |
 | `doc/porting-bsd.md` | for porting a BSD OS: the boot protocol and a specification of each driver the SoC needs, from BSD and observed sources only (no GPL code) |
 | `Inputs/` | RD68031, RD68884, IIsiFPGA (a MC68030 PDS card, whose bus bridge ours started from), RD68041 (an MC68040), QuadraFPGA (a 68040 PDS card, our 040 bridge's bus witness), and the Motorola and board documentation (add-only) |
 | `litex_68k/m68030_bus.py` | the MC68030 bus record and `M68030ToWishbone`, L1-L5's bridge (`RD68031.bus_bridge = "sync"`) |

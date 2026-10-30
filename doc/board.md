@@ -52,7 +52,7 @@ Linux and NetBSD needed (`doc/l11-rd68041.md`). The older snapshots:
 - `wukong-rd68041-fpu-eth-sd-25m/` has neither: it runs the BIOS and bare
   metal, but Linux with glibc dies at init.
 
-On the `smp` branch, `wukong-rd68041-nofpu-smp-eth-sd-25m-c5ba651` has two
+`wukong-rd68041-nofpu-smp-eth-sd-25m-c5ba651` has two
 MC68LC040s on one bus, for the BIOS and bare metal (`doc/l18-smp.md`): the
 BIOS runs on CPU 0, and a program starts CPU 1 (`smp.h`). Two MC68040s do not
 fit. On the board, cputest040 and smptest (`sim/litex/smp_test.py --serial`)
