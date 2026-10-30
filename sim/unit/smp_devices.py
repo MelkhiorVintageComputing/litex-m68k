@@ -7,7 +7,8 @@
 # WHOAMI for each processor, BOOT_PC, the interprocessor interrupts, RELEASE,
 # TCI on reads; no TA while the other processor's MI is asserted, unless it
 # has been in reset since its last TS (the gate); the counters, and their
-# clearing.
+# clearing; the SoC's reset request clearing RELEASE, BOOT_PC and the
+# interprocessor interrupts.
 from migen import *
 
 from litex_68k.m68040_bus import m68040_bus_layout
@@ -95,6 +96,17 @@ def gen():
     yield cpus[1].mi_n_o.eq(1)
     yield from transfer(0, REG_RELEASE, write=0)
     log["held"] = (yield dut.devices.release)
+    # The SoC's reset request (ctrl's cpu_rst): CPU 1 back in reset, and no
+    # BOOT_PC to send it to.
+    yield from transfer(0, REG_BOOT_PC, write=0x40005678)
+    yield from transfer(0, REG_IPI_SET, write=1)
+    yield from transfer(0, REG_RELEASE, write=1)
+    log["before_reset"] = ((yield dut.devices.release), (yield dut.devices.boot_pc), (yield dut.devices.ipi))
+    yield dut.reset.eq(1)
+    yield
+    yield dut.reset.eq(0)
+    yield; yield
+    log["after_reset"] = ((yield dut.devices.release), (yield dut.devices.boot_pc), (yield dut.devices.ipi))
     # The counters.
     log["stats"] = {}
     for name in STATS:
@@ -123,9 +135,11 @@ assert log["ipi_after_ack1"] == 0b00
 assert log["mi_blocked"] is None, "TA while the other processor's MI was asserted"
 assert log["mi_gated"] is not None and log["mi_still_gated"] is not None, "the MI gate"
 assert log["held"] == 0
+assert log["before_reset"] == (1, 0x40005678, 0b10), log["before_reset"]
+assert log["after_reset"] == (0, 0, 0), "the reset request: " + str(log["after_reset"])
 s = log["stats"]
 assert s["contention"] == 0 and s["owner"] == 0 and s["atomicity"] == 0 and s["intervene"] == 0, s
-assert s["ts0"] >= 7 and s["ts1"] == 2 and s["miwait"] == 0, s
+assert s["ts0"] >= 10 and s["ts1"] == 2 and s["miwait"] == 0, s
 assert log["contention"] == 1
 assert all(v == 0 for k, v in log["cleared"].items() if k not in ("ts0", "miwait")), log["cleared"]
 print("smp_devices: ok")

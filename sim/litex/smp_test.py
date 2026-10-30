@@ -12,7 +12,8 @@ l4_test.py loads cputest.
        prompt), litex_term on its UART loading smptest at 0x40000000.
     3. smptest: CPU 0 starts CPU 1, both run the tests, CPU 0 reports; its
        PASS line, and the report's lines checked: both CPUs' interrupts,
-       the routine rewritten under CPU 1, the shootdown, the bus counters.
+       the routine rewritten under CPU 1, the shootdown, timer0 and timer1
+       each to its own CPU (when the SoC has timer1), the bus counters.
 
 Prints the exchanges, then "SMP PASS" or "SMP FAIL: <why>"; exit status 0 on
 pass. Needs --sdram in litex_sim: smptest uses main RAM up to $4013_FFFF."""
@@ -103,6 +104,11 @@ def main():
         check(ticks0 >= 4 and ticks1 >= 4, "timer interrupts per CPU: {} and {}".format(ticks0, ticks1))
         check((r0, r1) == (1, 2), "the routine rewritten under CPU 1: {} then {}".format(r0, r1))
         check((m.group(7), m.group(8)) == ("aaaa0000", "bbbb0000"), "the shootdown")
+        t = re.search(r"smptest: timer0 ticks (\d+) (\d+), timer1 ticks (\d+) (\d+)", out)
+        if t:                           # timer1 (core.py's "+smp" SoCs since L23)
+            t00, t10, t01, t11 = (int(t.group(k)) for k in range(1, 5))
+            check(t00 >= 8 and t11 >= 8 and t10 == 0 and t01 == 0,
+                  "a timer per CPU: timer0 {} {}, timer1 {} {}".format(t00, t10, t01, t11))
         bus = re.search(r"smptest: bus: (.*)\n", out)
         check(bus, "smptest: no bus counters")
         stats = dict((k, int(v)) for k, v in re.findall(r"(\w+) (\d+)", bus.group(1)))

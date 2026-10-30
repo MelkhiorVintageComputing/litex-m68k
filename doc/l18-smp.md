@@ -87,7 +87,7 @@ A long word each, in the I/O region; the board answers reads with TCI.
 | `$00` | WHOAMI | R: the processor making the access (the one the arbiter granted) |
 | `$04` | IPI_SET | W: interrupt CPU n (n = bit 0) |
 | `$08` | IPI_ACK | W: acknowledge one's own |
-| `$0C` | RELEASE | W: non-zero lets CPU 1 out of reset, 0 holds it there |
+| `$0C` | RELEASE | W: non-zero lets CPU 1 out of reset, 0 holds it there; cleared by a reset of the SoC (with BOOT_PC, BOOT_SP and the IPIs) |
 | `$10` | BOOT_PC | RW: where crt0 sends CPU 1; 0: it waits |
 | `$14` | BOOT_SP | RW: its stack |
 | `$18` | NCPUS | R: 2 |
@@ -110,6 +110,10 @@ program runs here unchanged.
 
 - CPU 1 is held in reset (RSTI) until RELEASE. The BIOS runs on CPU 0 as
   before.
+- A reset from the SoC controller (`ctrl`: the BIOS's `reboot`, or a CPU
+  reset alone) resets both processors and clears RELEASE, BOOT_PC, BOOT_SP
+  and the IPIs: CPU 1 stays in reset until the next program releases it,
+  instead of starting again at the old BOOT_PC (L23).
 - Released, CPU 1 reads the ROM's reset vectors, and crt0 reads WHOAMI. If it
   is non-zero, crt0 loads BOOT_SP, jumps to BOOT_PC, and touches nothing of the
   BIOS's.
@@ -245,6 +249,46 @@ Reading 64 KiB takes CPU 0 589,128 sys clocks alone (about 11 MB/s at
 As in litex_sim, the shared bus does not slow either one: each line fill's
 latency in the bridge and LiteDRAM leaves the bus idle most of the time, so
 two processors read about twice as much as one.
+
+## L23: what NetBSD asked for
+
+NetBSD's SMP port (on the NetBSD side) asked for a clock interrupt per CPU,
+and for litexboot to describe the board.
+
+- **`timer1`** in the `+smp` SoCs (`core.py`, `add_soc_components`): LiteX's
+  timer, without timer0's uptime counter, on interrupt line 4 (UART 0, timer0
+  1, Ethernet 2, the SD card 3). NetBSD routes it to CPU 1 alone
+  (`cpu_irq_mask1`), and timer0 and the devices to CPU 0.
+- **The board's reset:** RELEASE, BOOT_PC, BOOT_SP and the IPIs are cleared
+  by the SoC's reset request, so that after a reset CPU 1 does not start
+  again by itself (above). `sim/unit/smp_devices.py` checks it.
+- **litexboot,** built with `-D__rd68041_smp__`, adds two records. These tags
+  are not in `patches/linux`, whose kernel runs on one processor:
+
+  | Tag | | Word a | Word b |
+  |---|---|---|---|
+  | `0x8006` | `BI_LITEX_SMP` | `0xFFFF0000` | NCPUS (`$18`) |
+  | `0x8007` | `BI_LITEX_TIMER1` | timer1's CSR base | its line |
+
+  It also stops timer1 and clears `cpu_irq_mask1` before the kernel. On the
+  uniprocessor SoCs, its binary is unchanged.
+- **`sw/litexboot/bidump/`:** a test kernel that prints the bootinfo it was
+  given:
+  `scripts/board.py boot --kernel bidump.elf --no-dtb --until 'bidump: end'`.
+- **smptest** runs both timers at once, as NetBSD routes them: each CPU must
+  take only its own timer's interrupts (checks $720, $730).
+- The bitstream is `wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-c5ba651`:
+  52,458 LUTs (82.7 %), WNS +0.230 ns at 25 MHz.
+
+**Checked:** `sim/unit`; the L1 bench, both variants; smptest in litex_sim
+(48 checks). On the Wukong, the SD card untouched:
+
+| Run | Result |
+|---|---|
+| the BIOS, cputest040 on CPU 0 | memspeed 11.9/10.7 MiB/s; PASS, 81 checks |
+| smptest, 16 and 256 iterations | PASS, 48 and 288 checks; timer0 12 ticks on CPU 0 and none on CPU 1, timer1 8 on CPU 1 and none on CPU 0; the bus checks all 0 |
+| smptest `--negative` | fails at $400 alone |
+| bidump, through litexboot | `8006 000c ffff0000 00000002`, `8007 000c f0005000 00000004`, and the other records as before |
 
 ## The software rules (setup A, from RD68041's doc/smp.md)
 

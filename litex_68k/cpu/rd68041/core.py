@@ -34,7 +34,9 @@ $FFFF_0000 (WHOAMI, the interprocessor interrupts at level 5, CPU 1's release
 and entry, the bus counters). CPU 1 stays in reset until software releases it;
 crt0.S then sends it to BOOT_PC. LiteX's interrupts reach each CPU through a
 mask of its own: cpu_irq_mask is CPU 0's, cpu_irq_mask1 CPU 1's (irq.h picks
-by WHOAMI). Software is built with -D__rd68041_smp__.
+by WHOAMI). A second timer, timer1, on line 4, is there for CPU 1. The
+SoC's reset request (ctrl) also puts CPU 1 back in reset. Software is built
+with -D__rd68041_smp__.
 """
 
 import os
@@ -52,6 +54,8 @@ from litex.soc.cores.cpu import CPU
 from litex_68k.m68040_bus import m68040_bus_layout, M68040ToFIFOToSoC
 from litex_68k.m68040_smp import M68040SMPBus, m68040_pins_layout, rd68041_smp_params, IPI_LEVEL
 from litex_68k.cpu.rd68031.core import IRQ_LEVEL, BUS_TIMEOUT, WishboneErrorTimeout, cpu_domain_reset
+
+TIMER1_INTERRUPT = 4    # "+smp": CPU 1's timer (add_soc_components)
 
 # Variants -----------------------------------------------------------------------------------------
 
@@ -233,6 +237,7 @@ class RD68041(CPU):
             rst.eq(ResetSignal(cd) | reset),
             cpus[0].rsti_n.eq(~rst),
             cpus[1].rsti_n.eq(~rst & board.devices.release),
+            board.reset.eq(reset),
         ]
         self.cpu_params_smp = [rd68041_smp_params(pins, board, fpu, clk=ClockSignal(cd),
                                                   rst_n=~rst, ipl_n=ipl_n[i])
@@ -241,6 +246,14 @@ class RD68041(CPU):
     def add_soc_components(self, soc):
         # Main RAM's region, once add_sdram has made it (add_memory_buses).
         self.soc_regions = soc.bus.regions
+        # With two processors, a second timer, for CPU 1's clock interrupt
+        # (NetBSD's hardclock on each CPU), without timer0's uptime. Its line
+        # is fixed, after those the SoC allocates next (UART 0, timer0 1, and
+        # on the Wukong Ethernet 2 and the SD card 3).
+        if self.smp:
+            from litex.soc.cores.timer import Timer
+            soc.add_module(name="timer1", module=Timer())
+            soc.irq.add("timer1", n=TIMER1_INTERRUPT)
 
     def add_memory_buses(self, address_width, data_width):
         """Main RAM on a LiteDRAM native port of the bridge's own, when the

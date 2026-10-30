@@ -11,8 +11,9 @@
  *    segment), where head.S looks for it: the machine, CPU, FPU (FNOP says
  *    whether there is one; the record is always there, head.S reads garbage
  *    otherwise), MMU, main RAM, the initramfs, the command line, and where
- *    the SoC's cores are (bootinfo-litex.h);
- *  - leaves the SoC quiet (interrupts masked, timer0 stopped), the caches off,
+ *    the SoC's cores are (bootinfo-litex.h); with two processors ("+smp"),
+ *    the board's registers and CPU 1's timer too;
+ *  - leaves the SoC quiet (interrupts masked, timer0 and timer1 stopped), the caches off,
  *    and jumps to the kernel's entry point, MMU off, IPL 7. */
 
 #include <stdio.h>
@@ -151,6 +152,14 @@ int main(void)
 	record64(BI_LITEX_TIMER0, CSR_TIMER0_BASE, TIMER0_INTERRUPT);
 	if (p->dtb_size)
 		record64(BI_LITEX_DTB, p->dtb_addr, p->dtb_size);
+#ifdef __rd68041_smp__
+	/* Two processors (core.py's "+smp"): the board's registers, and CPU 1's
+	 * timer. A kernel without these records is on one processor. */
+	record64(BI_LITEX_SMP, SMP_BASE, *(volatile uint32_t *)SMP_NCPUS);
+#ifdef CSR_TIMER1_BASE
+	record64(BI_LITEX_TIMER1, CSR_TIMER1_BASE, TIMER1_INTERRUPT);
+#endif
+#endif
 	record(BI_LAST, NULL, 0);
 
 	printf("litexboot: bootinfo at 0x%08lx (%ld bytes), FPU %s, initrd 0x%08lx+0x%lx\n",
@@ -175,6 +184,12 @@ int main(void)
 	timer0_en_write(0);
 	timer0_ev_enable_write(0);
 	timer0_ev_pending_write(timer0_ev_pending_read());
+#ifdef CSR_TIMER1_BASE
+	csr_write_simple(0, CSR_CPU_IRQ_MASK1_ADDR);   /* "+smp": CPU 1's mask, and its timer */
+	timer1_en_write(0);
+	timer1_ev_enable_write(0);
+	timer1_ev_pending_write(timer1_ev_pending_read());
+#endif
 #ifdef CSR_SDCARD_PHY_SETTINGS_ADDR
 	/* LiteSDCard's PHY data width back to its reset value, 4-bit: Linux's
 	 * litex_mmc never sets it (it puts the card in 4-bit mode and assumes

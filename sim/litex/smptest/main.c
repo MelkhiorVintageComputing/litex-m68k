@@ -21,8 +21,9 @@
  * DTT1 (write-through, U 01) when it is outside the mapped megabyte.
  *
  * Each processor runs the same tests (run_tests), in phases ended by a
- * barrier; CPU 1's failures go to the CI page, and CPU 0 reports both. The
- * line "smptest: PASS (n checks)" or "smptest: FAIL (...)" ends it. */
+ * barrier; with timer1 (L23), a timer per CPU too, as NetBSD routes them.
+ * CPU 1's failures go to the CI page, and CPU 0 reports both. The line
+ * "smptest: PASS (n checks)" or "smptest: FAIL (...)" ends it. */
 
 #include <stdio.h>
 #include <stdint.h>
@@ -85,6 +86,7 @@ struct ci {
 	unsigned long alive;          /* CPU 1's WHOAMI, + 1 */
 	unsigned long ipis[2];        /* interprocessor interrupts taken */
 	unsigned long ticks[2];       /* timer interrupts taken */
+	unsigned long tticks[2][2];   /* NetBSD's routing: each CPU's ticks from timer0, timer1 */
 	unsigned long shoot;          /* CPU 0 asks CPU 1 to flush its ATC */
 	unsigned long shot;
 	unsigned long seq, ack;       /* the producer and the consumer */
@@ -208,8 +210,20 @@ void irq_c(void);
 void irq_c(void)
 {
 	int cpu = smp_whoami();
-	timer0_ev_pending_write(timer0_ev_pending_read());
-	ci->ticks[cpu]++;
+	/* Only the lines this CPU's mask lets through: the other's are its own
+	 * to acknowledge. */
+	uint32_t lines = irq_pending() & irq_getmask();
+	if (lines & (1 << TIMER0_INTERRUPT)) {
+		timer0_ev_pending_write(timer0_ev_pending_read());
+		ci->ticks[cpu]++;
+		ci->tticks[cpu][0]++;
+	}
+#ifdef CSR_TIMER1_BASE
+	if (lines & (1 << TIMER1_INTERRUPT)) {
+		timer1_ev_pending_write(timer1_ev_pending_read());
+		ci->tticks[cpu][1]++;
+	}
+#endif
 }
 
 void unexpected_c(uint32_t pc, uint32_t fv);
@@ -363,6 +377,39 @@ static void run_tests(int cpu)
 	barrier(cpu, phase++);
 	check(cpu, ci->ticks[cpu] >= 4, 0x710 + cpu);
 
+#ifdef CSR_TIMER1_BASE
+	/* A timer each, both running, as NetBSD routes them: timer0 to CPU 0
+	 * alone, timer1 (another period) to CPU 1 alone. */
+	if (cpu == 0) {
+		ci->tticks[0][0] = ci->tticks[0][1] = ci->tticks[1][0] = ci->tticks[1][1] = 0;
+		timer0_en_write(0);
+		timer0_load_write(0);
+		timer0_reload_write(CONFIG_CLOCK_FREQUENCY / 20000);
+		timer0_ev_pending_write(timer0_ev_pending_read());
+		timer0_ev_enable_write(1);
+		timer1_en_write(0);
+		timer1_load_write(0);
+		timer1_reload_write(CONFIG_CLOCK_FREQUENCY / 13000);
+		timer1_ev_pending_write(timer1_ev_pending_read());
+		timer1_ev_enable_write(1);
+		csr_write_simple(1 << TIMER0_INTERRUPT, CSR_CPU_IRQ_MASK_ADDR);
+		csr_write_simple(1 << TIMER1_INTERRUPT, CSR_CPU_IRQ_MASK1_ADDR);
+		timer0_en_write(1);
+		timer1_en_write(1);
+		while (ci->tticks[0][0] < 8 || ci->tticks[1][1] < 8)
+			;
+		csr_write_simple(0, CSR_CPU_IRQ_MASK_ADDR);
+		csr_write_simple(0, CSR_CPU_IRQ_MASK1_ADDR);
+		timer0_en_write(0);
+		timer0_ev_enable_write(0);
+		timer1_en_write(0);
+		timer1_ev_enable_write(0);
+		check(cpu, ci->tticks[0][1] == 0 && ci->tticks[1][0] == 0, 0x720);
+	}
+	barrier(cpu, phase++);
+	check(cpu, ci->tticks[cpu][cpu] >= 8, 0x730 + cpu);
+#endif
+
 	/* The bus shared: each reads its private 64 KiB (copyback, through its
 	 * 4 KiB data cache: a line fill every 16 bytes), alone, then both at
 	 * once. The time, in sys clocks, is CPU 0's timer. */
@@ -500,6 +547,10 @@ int main(void)
 	printf("smptest: ipis %lu %lu, ticks %lu %lu, routine %lu then %lu, remap %08lx then %08lx\n",
 	       ci->ipis[0], ci->ipis[1], ci->ticks[0], ci->ticks[1], ci->routine[0], ci->routine[1],
 	       ci->remap[1][0], ci->remap[1][1]);
+#ifdef CSR_TIMER1_BASE
+	printf("smptest: timer0 ticks %lu %lu, timer1 ticks %lu %lu\n",
+	       ci->tticks[0][0], ci->tticks[1][0], ci->tticks[0][1], ci->tticks[1][1]);
+#endif
 	printf("smptest: reading 64 KiB, sys clocks: CPU 0 alone %lu; both at once, CPU 0 %lu, CPU 1 %lu\n",
 	       ci->busy[0][0], ci->busy[1][0], ci->busy[1][1]);
 	report_stats();

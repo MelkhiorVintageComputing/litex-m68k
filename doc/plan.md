@@ -213,6 +213,8 @@ does SMP:
   of the LUTs); on the board, the BIOS, cputest040 and smptest (256
   iterations too) pass, every bus check at 0.
 - L22: the documentation.
+- L23: NetBSD's requests: timer1 for CPU 1, litexboot's `BI_LITEX_SMP` and
+  `BI_LITEX_TIMER1`, the board's registers cleared by a reset of the SoC.
 
 **Later, noted.** Upstreaming `arch/m68k/litex`, `patches/litex`, `patches/gcc`,
 `patches/musl` (the RD68884 and RD68041 fixes are upstream: 7a188db,

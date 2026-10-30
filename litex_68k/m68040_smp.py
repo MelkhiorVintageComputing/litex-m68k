@@ -159,7 +159,9 @@ class M68040SMPDevices(LiteXModule):
     then).
 
     `ipi[i]` raises CPU i's interrupt request; `release` lets CPU 1 out of
-    reset."""
+    reset. `reset` (the SoC's reset request, ctrl's soc_rst or cpu_rst) clears
+    them, BOOT_PC and BOOT_SP: CPU 1 is back in reset, and released again only
+    by the software that runs next."""
     def __init__(self, bus, who, mi_n, stats):
         self.d_o     = Signal(32)
         self.d_oe    = Signal()
@@ -170,6 +172,7 @@ class M68040SMPDevices(LiteXModule):
         self.boot_pc = Signal(32)
         self.boot_sp = Signal(32)
         self.clear   = Signal()        # a write to the first counter: clear them all
+        self.reset   = Signal()
 
         # # #
 
@@ -213,6 +216,9 @@ class M68040SMPDevices(LiteXModule):
                 self.d_o.eq(rdata),
                 self.d_oe.eq(rw),
             ),
+            If(self.reset,
+                self.ipi.eq(0), self.release.eq(0), self.boot_pc.eq(0), self.boot_sp.eq(0),
+            ),
         ]
 
 # The board ----------------------------------------------------------------------------------------
@@ -226,11 +232,13 @@ class M68040SMPBus(LiteXModule):
     the bridge drives. `cpu_inputs()` gives the resolved bus as the
     processors' bussed inputs, for rd68041_top's parameters. `mi_n` is memory's MI (both
     processors', gated) for the bridge; `ignore` is the devices' window, which
-    the bridge must leave to them."""
+    the bridge must leave to them. `reset` is the SoC's reset request, for the
+    devices."""
     def __init__(self, cpus, bus, use_locke=True, gapless=False, mi_gate=True):
         assert len(cpus) == 2
         self.cpus = cpus
         self.mi_n = Signal()
+        self.reset = Signal()
         self.ignore = lambda a: a[8:] == (DEVICES_BASE >> 8)
 
         # # #
@@ -302,6 +310,7 @@ class M68040SMPBus(LiteXModule):
         # The counters (STATS).
         self.stats = stats = {name: Signal(32, name="smp_" + name) for name in STATS}
         self.devices = dev = M68040SMPDevices(self, who_q, self.mi_n, stats)
+        self.comb += dev.reset.eq(self.reset)
         self.stats_logic(cpus, stats, dev.clear, who_q, arb)
 
         # D, and the terminations: a snooping processor may drive TA (it never

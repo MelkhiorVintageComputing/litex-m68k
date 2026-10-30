@@ -56,7 +56,9 @@ On the `smp` branch, `wukong-rd68041-nofpu-smp-eth-sd-25m-c5ba651` has two
 MC68LC040s on one bus, for the BIOS and bare metal (`doc/l18-smp.md`): the
 BIOS runs on CPU 0, and a program starts CPU 1 (`smp.h`). Two MC68040s do not
 fit. On the board, cputest040 and smptest (`sim/litex/smp_test.py --serial`)
-pass.
+pass. `wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-c5ba651` is the same with
+timer1 for CPU 1, litexboot's SMP records, and CPU 1 put back in reset by a
+reset of the SoC (L23, for NetBSD's SMP port): use it from now on.
 
 A kernel for them must know the 68040: its caches are copyback-capable and
 pushed with CPUSH, I/O wants a TTR or noncachable pages, and the FPU leaves

@@ -22,6 +22,10 @@
 #define BI_LITEX_UART    0x8003
 #define BI_LITEX_TIMER0  0x8004
 #define BI_LITEX_DTB     0x8005
+/* "+smp" only (two RD68041s, doc/l18-smp.md); not in patches/linux, whose
+ * kernel is uniprocessor. */
+#define BI_LITEX_SMP     0x8006         /* base of the board's registers, NCPUS */
+#define BI_LITEX_TIMER1  0x8007         /* timer1's CSR base, its interrupt line */
 
 #define MACH_LITEX       15
 #define CPU_68030        (1 << 1)

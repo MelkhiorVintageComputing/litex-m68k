@@ -200,8 +200,9 @@ jump_kernel:
   - accept absolute physical addresses (`p_paddr` ≥ `MAIN_RAM_BASE`);
   - pass a pointer to the bootinfo in a register;
   - add records for the cores litexboot does not describe yet (LiteEth,
-    LiteSDCard: take the next free tags, `0x8006` and up, and keep them in
-    step with this project's Linux patch so both stay compatible).
+    LiteSDCard: take the next free tags, `0x8008` and up, and keep them in
+    step with this project's Linux patch so both stay compatible;
+    `0x8006` and `0x8007` are the two-processor SoC's, section 10).
 - litexboot is built against the SoC's generated headers (`sw/litexboot/Makefile`
   includes the SoC's `variables.mak` and LiteX's `common.mak`).
 
@@ -251,6 +252,8 @@ The list ends with a record of tag 0 (`BI_LAST`).
 | `0x8003` | `BI_LITEX_UART` | u32 base, u32 interrupt line |
 | `0x8004` | `BI_LITEX_TIMER0` | u32 base, u32 interrupt line |
 | `0x8005` | `BI_LITEX_DTB` | u32 physical address, u32 size of a flattened device tree (section 7). It must be kept reserved if the kernel uses it |
+| `0x8006` | `BI_LITEX_SMP` | two processors only (section 10): u32 base of the board's registers (`0xFFFF_0000`), u32 NCPUS (2) |
+| `0x8007` | `BI_LITEX_TIMER1` | two processors only: u32 base, u32 interrupt line of CPU 1's timer |
 
 Interrupt lines and CSR bases differ from one SoC build to the next: take
 them from the bootinfo (or the DTB), never from constants.
@@ -922,7 +925,61 @@ are the MC68040 user's manual (UM below) and what was seen here
     (UM appendix A). Without an FPU emulator in the kernel, user space must
     be soft-float.
 
-## 10. Sources
+## 10. Two RD68041s (SMP)
+
+`~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-c5ba651`
+has two MC68LC040s on one bus, with the SoC of section 9: RD68041's
+two-processor board in its setup A (`doc/l18-smp.md`, from RD68041's
+`doc/smp.md`).
+
+- **Finding it:** litexboot writes `BI_LITEX_SMP` and `BI_LITEX_TIMER1`
+  only on this SoC. Without `BI_LITEX_SMP`, the kernel is on one processor
+  and must not touch `$FFFF_0000`: on the other SoCs it is a bus error after
+  the bridge's time-out (65,536 sys clocks), as any address nothing answers.
+- **The board's registers,** long words at `$FFFF_0000`, in the I/O region:
+
+  | Offset | | |
+  |---|---|---|
+  | `$00` | WHOAMI | R: this processor, 0 or 1 |
+  | `$04` | IPI_SET | W: interrupt CPU n (bit 0), level 5, autovector 29, until it acknowledges |
+  | `$08` | IPI_ACK | W: acknowledge one's own |
+  | `$0C` | RELEASE | W: non-zero lets CPU 1 out of reset; 0 holds it there |
+  | `$10` | BOOT_PC | RW: where CPU 1 goes, physical; 0: it waits |
+  | `$14` | BOOT_SP | RW: its stack |
+  | `$18` | NCPUS | R: 2 |
+  | `$20`-`$48` | the counters | R: contention, turnaround, owner, atomicity, intervene (all must stay 0), longest wait for the bus, transfers of CPU 0 and of CPU 1, grants, locked sequences, clocks waited for MI; a write to `$20` clears them |
+
+- **CPU 1's start:** it is in reset from power-up and after any reset of the
+  SoC controller (`ctrl`), which also clears RELEASE, BOOT_PC and BOOT_SP.
+  Write BOOT_SP, BOOT_PC, then RELEASE. CPU 1 runs the ROM's crt0, which
+  sees WHOAMI = 1, loads BOOT_SP and jumps to BOOT_PC: supervisor, IPL 7,
+  VBR 0, translation, TTRs and caches as reset leaves them. It must set its
+  own VBR, TTRs, MMU and CACR.
+- **Interrupts:** each CPU has its own mask, `cpu_irq_mask` for CPU 0 and
+  `cpu_irq_mask1` (the next CSR) for CPU 1; `cpu_irq_pending` is shared.
+  A line may go to either or both: an interrupt handler acknowledges only
+  the lines of its own mask. LiteX's lines are level 2 (autovector 26), the
+  interprocessor interrupts level 5.
+- **Timers:** timer0 as in section 6.2; timer1 is the same core without
+  the uptime counter, for CPU 1's clock.
+- **The rules of setup A** (RD68041 `doc/smp.md`): processors snoop only
+  write-through writes made with U = 01.
+  - Every page both processors use is write-through with U = 01; copyback
+    only for a private page, with U = 00, pushed before it is handed over.
+  - Before its MMU or a TTR is set, a processor's accesses have U = 00:
+    nothing it writes then is snooped. Keep what it writes then (its first
+    stack) out of the other's caches, or noncachable.
+  - Page tables write-through or noncachable: table searches are never
+    snooped. Each processor's ATC is its own: a changed mapping needs the
+    other one to flush, by an interprocessor interrupt.
+  - Lock words and lock-free data aligned, in write-through or noncachable
+    memory. TAS, CAS and CAS2 are locked, and the arbiter keeps a locked
+    sequence whole.
+  - The devices' DMA (the SD card) is not snooped, nor LiteEth's buffers at
+    `$8000_0000`: both noncachable, or pushed and invalidated as in
+    section 9.
+
+## 11. Sources
 
 - LiteX (BSD-2-Clause): `litex/soc/cores/{timer,uart}.py`,
   `litex/soc/integration/soc.py` (`SoCController`, `add_sdcard`,
