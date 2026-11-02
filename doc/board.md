@@ -39,14 +39,16 @@ the FPU (`--bitstream` selects it), for software built for soft float.
 
 **RD68041**, an MC68040, at 25 MHz (`doc/l11-rd68041.md`), with the same
 devices, map, interrupts and BIOS:
-- `~/LITEX-68K/bitstreams/wukong-rd68041-fpu-eth-sd-25m-c5ba651/`: the
+- `~/LITEX-68K/bitstreams/wukong-rd68041-fpu-eth-sd-25m-2ceb016/`: the
   MC68040, FPU included.
-- `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-c5ba651/`: the
+- `~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-eth-sd-25m-2ceb016/`: the
   MC68LC040, no FPU.
 
-`-c5ba651` is the RD68041 commit they are built from. It is M15, faster
-reads and writes, and it has both of the fixes to the instruction fetch that
-Linux and NetBSD needed (`doc/l11-rd68041.md`). The older snapshots:
+`-2ceb016` is the RD68041 commit they are built from: M15, faster reads and
+writes, then a smaller core (register files in LUT RAM), with both of the
+fixes to the instruction fetch that Linux and NetBSD needed
+(`doc/l11-rd68041.md`). The older snapshots:
+- `-c5ba651` is M15's faster reads and writes, before the smaller core.
 - `-4300689` has both fixes, without M15.
 - `-p1` has the first fix only. NetBSD's install ramdisk froze it.
 - `wukong-rd68041-fpu-eth-sd-25m/` has neither: it runs the BIOS and bare
@@ -58,7 +60,9 @@ BIOS runs on CPU 0, and a program starts CPU 1 (`smp.h`). Two MC68040s do not
 fit. On the board, cputest040 and smptest (`sim/litex/smp_test.py --serial`)
 pass. `wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-c5ba651` is the same with
 timer1 for CPU 1, litexboot's SMP records, and CPU 1 put back in reset by a
-reset of the SoC (L23, for NetBSD's SMP port): use it from now on.
+reset of the SoC (L23, for NetBSD's SMP port).
+`wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-2ceb016` is that one on RD68041
+2ceb016: use it from now on.
 
 A kernel for them must know the 68040: its caches are copyback-capable and
 pushed with CPUSH, I/O wants a TTR or noncachable pages, and the FPU leaves

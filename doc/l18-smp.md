@@ -277,7 +277,8 @@ and for litexboot to describe the board.
   `scripts/board.py boot --kernel bidump.elf --no-dtb --until 'bidump: end'`.
 - **smptest** runs both timers at once, as NetBSD routes them: each CPU must
   take only its own timer's interrupts (checks $720, $730).
-- The bitstream is `wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-c5ba651`:
+- The bitstream was `wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-c5ba651`
+  (now `-2ceb016`, below):
   52,458 LUTs (82.7 %), WNS +0.230 ns at 25 MHz.
 
 **Checked:** `sim/unit`; the L1 bench, both variants; smptest in litex_sim
@@ -289,6 +290,17 @@ and for litexboot to describe the board.
 | smptest, 16 and 256 iterations | PASS, 48 and 288 checks; timer0 12 ticks on CPU 0 and none on CPU 1, timer1 8 on CPU 1 and none on CPU 0; the bus checks all 0 |
 | smptest `--negative` | fails at $400 alone |
 | bidump, through litexboot | `8006 000c ffff0000 00000002`, `8007 000c f0005000 00000004`, and the other records as before |
+
+### On RD68041 2ceb016
+
+`wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-2ceb016`: 49,661 LUTs (78 %),
+WNS +0.183 ns. On the Wukong:
+- memspeed 11.9/11.4 MiB/s;
+- cputest040 on CPU 0: 81 checks;
+- smptest: 16 and 256 iterations (48 and 288 checks), every bus check 0;
+  `--negative` fails at $400 alone; bidump shows both SMP records.
+- Reading 64 KiB: 554,548 sys clocks alone (589,128 on c5ba651); 529,204
+  and 556,456 with both at once.
 
 ## The software rules (setup A, from RD68041's doc/smp.md)
 

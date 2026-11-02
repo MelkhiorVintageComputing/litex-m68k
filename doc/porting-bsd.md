@@ -862,7 +862,7 @@ Bitstreams to use:
 
 ## 9. RD68041: the same SoC with an MC68040
 
-`~/LITEX-68K/bitstreams/wukong-rd68041-{fpu,nofpu}-eth-sd-25m-c5ba651` (`doc/board.md`)
+`~/LITEX-68K/bitstreams/wukong-rd68041-{fpu,nofpu}-eth-sd-25m-2ceb016` (`doc/board.md`)
 run RD68041, an MC68040, or an MC68LC040 without its FPU, at 25 MHz. The
 memory map, the CSRs, the interrupts (IPL 2, autovector 26), the devices,
 litexboot and the bootinfo are the same, but for what follows. The sources
@@ -927,7 +927,7 @@ are the MC68040 user's manual (UM below) and what was seen here
 
 ## 10. Two RD68041s (SMP)
 
-`~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-c5ba651`
+`~/LITEX-68K/bitstreams/wukong-rd68041-nofpu-smp-timer1-eth-sd-25m-2ceb016`
 has two MC68LC040s on one bus, with the SoC of section 9: RD68041's
 two-processor board in its setup A (`doc/l18-smp.md`, from RD68041's
 `doc/smp.md`).
